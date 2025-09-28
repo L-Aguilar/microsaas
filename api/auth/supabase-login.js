@@ -15,22 +15,36 @@ export default async function handler(req, res) {
 
   let body;
   try {
+    console.log('Raw req.body type:', typeof req.body);
+    console.log('Raw req.body:', req.body);
+    
     // Parse body if it's a string
     if (typeof req.body === 'string') {
       body = JSON.parse(req.body);
     } else {
       body = req.body || {};
     }
+    
+    console.log('Parsed body:', body);
   } catch (e) {
-    return res.status(400).json({ message: 'Invalid JSON in request body' });
+    console.error('Body parsing error:', e);
+    return res.status(400).json({ message: 'Invalid JSON in request body', error: e.message });
   }
 
   const { email, password } = body;
 
-  console.log('Request body:', { email: email ? '[PROVIDED]' : '[MISSING]', password: password ? '[PROVIDED]' : '[MISSING]' });
+  console.log('Extracted credentials:', { 
+    email: email ? '[PROVIDED]' : '[MISSING]', 
+    password: password ? '[PROVIDED]' : '[MISSING]',
+    emailLength: email ? email.length : 0,
+    passwordLength: password ? password.length : 0
+  });
 
   if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required' });
+    return res.status(400).json({ 
+      message: 'Email and password are required',
+      received: { email: !!email, password: !!password }
+    });
   }
 
   try {
