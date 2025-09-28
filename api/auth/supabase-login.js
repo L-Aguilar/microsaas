@@ -13,7 +13,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  const { email, password } = req.body || {};
+  let body;
+  try {
+    // Parse body if it's a string
+    if (typeof req.body === 'string') {
+      body = JSON.parse(req.body);
+    } else {
+      body = req.body || {};
+    }
+  } catch (e) {
+    return res.status(400).json({ message: 'Invalid JSON in request body' });
+  }
+
+  const { email, password } = body;
+
+  console.log('Request body:', { email: email ? '[PROVIDED]' : '[MISSING]', password: password ? '[PROVIDED]' : '[MISSING]' });
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
