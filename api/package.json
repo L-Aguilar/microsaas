@@ -1,14 +1,8 @@
 {
-  "name": "bizflow-api",
+  "name": "microsaas-api",
   "version": "1.0.0",
+  "type": "module",
   "dependencies": {
-    "@vercel/node": "^3.0.0",
-    "bcrypt": "^6.0.0",
-    "pg": "^8.16.3",
-    "dotenv": "^17.2.1"
-  },
-  "devDependencies": {
-    "@types/bcrypt": "^6.0.0",
-    "@types/pg": "^8.15.5"
+    "@vercel/node": "^3.0.0"
   }
 }
