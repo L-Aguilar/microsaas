@@ -13,37 +13,46 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  let body;
-  try {
-    console.log('Raw req.body type:', typeof req.body);
-    console.log('Raw req.body:', req.body);
-    
-    // Parse body if it's a string
-    if (typeof req.body === 'string') {
-      body = JSON.parse(req.body);
-    } else {
-      body = req.body || {};
-    }
-    
-    console.log('Parsed body:', body);
-  } catch (e) {
-    console.error('Body parsing error:', e);
-    return res.status(400).json({ message: 'Invalid JSON in request body', error: e.message });
+  // Debug: log everything about the request
+  console.log('=== REQUEST DEBUG ===');
+  console.log('Method:', req.method);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Body type:', typeof req.body);
+  console.log('Body value:', req.body);
+  console.log('Body as string:', String(req.body));
+  
+  // Try different ways to get the body
+  let email, password;
+  
+  // Try direct access
+  if (req.body && typeof req.body === 'object') {
+    email = req.body.email;
+    password = req.body.password;
+    console.log('Method 1 - Direct object access:', { email: !!email, password: !!password });
   }
-
-  const { email, password } = body;
-
-  console.log('Extracted credentials:', { 
-    email: email ? '[PROVIDED]' : '[MISSING]', 
-    password: password ? '[PROVIDED]' : '[MISSING]',
-    emailLength: email ? email.length : 0,
-    passwordLength: password ? password.length : 0
-  });
-
+  
+  // If that didn't work, try parsing as JSON string
+  if (!email || !password) {
+    try {
+      const parsed = JSON.parse(req.body);
+      email = parsed.email;
+      password = parsed.password;
+      console.log('Method 2 - JSON.parse:', { email: !!email, password: !!password });
+    } catch (e) {
+      console.log('JSON parse failed:', e.message);
+    }
+  }
+  
+  // Last resort: return debug info
   if (!email || !password) {
     return res.status(400).json({ 
       message: 'Email and password are required',
-      received: { email: !!email, password: !!password }
+      debug: {
+        bodyType: typeof req.body,
+        bodyValue: req.body,
+        bodyString: String(req.body),
+        headers: req.headers
+      }
     });
   }
 
