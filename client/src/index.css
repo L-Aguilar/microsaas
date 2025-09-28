@@ -1,0 +1,377 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Modern Minimal Professional Color Palette */
+  --background: #ffffff;
+  --foreground: #1f2937;
+  --card: #f9fafb;
+  --card-foreground: #1f2937;
+  --popover: #ffffff;
+  --popover-foreground: #1f2937;
+  --primary: #000000;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f4f6;
+  --secondary-foreground: #1f2937;
+  --muted: #f9fafb;
+  --muted-foreground: #6b7280;
+  --accent: #f3f4f6;
+  --accent-foreground: #1f2937;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --warning: #f59e0b;
+  --warning-foreground: #ffffff;
+  --success: #10b981;
+  --success-foreground: #ffffff;
+  --info: #3b82f6;
+  --info-foreground: #ffffff;
+  --border: #e5e7eb;
+  --input: #ffffff;
+  --ring: #000000;
+  
+  /* Chart colors - contextual */
+  --chart-1: #3b82f6;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #8b5cf6;
+  
+  /* Sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1f2937;
+  --sidebar-primary: #000000;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f4f6;
+  --sidebar-accent-foreground: #1f2937;
+  --sidebar-border: #e5e7eb;
+  --sidebar-ring: #000000;
+  
+  /* Typography - Inter font */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  
+  /* Border radius - larger for modern look */
+  --radius: 0.75rem;
+  
+  /* Shadows - subtle and clean */
+  --shadow-2xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  
+  /* Brand colors - keep minimal */
+  --brand-primary: #000000;
+  --brand-50: #f9fafb;
+  --brand-100: #f3f4f6;
+  --brand-500: #000000;
+  --brand-600: #000000;
+  --brand-700: #000000;
+}
+
+/* Shimli theme configuration */
+.shimli-theme {
+  /* Main colors with Shimli purple */
+  --primary: #7e02c6;
+  --primary-foreground: #ffffff;
+  --ring: #7e02c6;
+  
+  /* Sidebar with Shimli purple */
+  --sidebar-primary: #7e02c6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #7e02c6;
+  
+  /* Brand colors with Shimli purple */
+  --brand-primary: #7e02c6;
+  --brand-50: #faf5ff;
+  --brand-100: #f3e8ff;
+  --brand-500: #7e02c6;
+  --brand-600: #6b02a6;
+  --brand-700: #580286;
+}
+
+.dark {
+  /* Dark mode - keeping minimal and professional */
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --popover: #1e293b;
+  --popover-foreground: #f1f5f9;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --secondary: #334155;
+  --secondary-foreground: #f1f5f9;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #334155;
+  --accent-foreground: #f1f5f9;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --warning: #f59e0b;
+  --warning-foreground: #000000;
+  --success: #10b981;
+  --success-foreground: #ffffff;
+  --info: #3b82f6;
+  --info-foreground: #ffffff;
+  --border: #334155;
+  --input: #1e293b;
+  --ring: #ffffff;
+  
+  /* Chart colors */
+  --chart-1: #3b82f6;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #8b5cf6;
+  
+  /* Sidebar */
+  --sidebar: #0f172a;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #334155;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #334155;
+  --sidebar-ring: #ffffff;
+  
+  /* Shadows for dark mode */
+  --shadow-2xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-xs: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+  --shadow-xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* Shimli theme for dark mode */
+.dark.shimli-theme {
+  /* Dark mode with Shimli purple */
+  --primary: #9d4edd;
+  --primary-foreground: #ffffff;
+  --ring: #9d4edd;
+  
+  /* Sidebar with Shimli purple in dark mode */
+  --sidebar-primary: #9d4edd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #9d4edd;
+  
+  /* Brand colors with Shimli purple in dark mode */
+  --brand-primary: #9d4edd;
+  --brand-500: #9d4edd;
+  --brand-600: #7e02c6;
+  --brand-700: #6b02a6;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground leading-relaxed;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    letter-spacing: -0.01em;
+  }
+
+  /* Modern button styles */
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 transition-colors duration-200 ease-in-out shadow-sm;
+  }
+
+  /* Card styles with proper shadows */
+  .card-modern {
+    @apply bg-card border border-border rounded-xl shadow-sm;
+  }
+
+  /* Focus rings for accessibility */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background;
+  }
+
+  /* Smooth transitions */
+  .transition-smooth {
+    @apply transition-all duration-200 ease-in-out;
+  }
+}
+
+@layer components {
+  /* Custom scrollbar styles for Kanban */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  
+  .scrollbar-thumb-border {
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  
+  .scrollbar-track-transparent {
+    scrollbar-track-color: transparent;
+  }
+  
+  /* Webkit scrollbar for Kanban */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+  
+  .kanban-column {
+    min-height: 500px;
+  }
+
+  .opportunity-card {
+    transition: all 0.2s ease-in-out;
+  }
+
+  .opportunity-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  }
+
+  .activity-timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: hsl(var(--border));
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 20px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: hsl(var(--brand-primary));
+    border: 2px solid hsl(var(--background));
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+
+  /* Status badge colors */
+  .status-lead { @apply bg-blue-100 text-blue-800; }
+  .status-active { @apply bg-green-100 text-green-800; }
+  .status-inactive { @apply bg-gray-100 text-gray-800; }
+  .status-blocked { @apply bg-red-100 text-red-800; }
+
+  .status-new { @apply bg-purple-100 text-purple-800; }
+  .status-qualifying { @apply bg-blue-100 text-blue-800; }
+  .status-proposal { @apply bg-yellow-100 text-yellow-800; }
+  .status-negotiation { @apply bg-orange-100 text-orange-800; }
+  .status-won { @apply bg-green-100 text-green-800; }
+  .status-lost { @apply bg-red-100 text-red-800; }
+  .status-on-hold { @apply bg-gray-100 text-gray-800; }
+
+  /* Rich Text Editor Styles */
+  .ProseMirror {
+    outline: none !important;
+    @apply text-sm;
+  }
+
+  .ProseMirror p {
+    margin: 0.5em 0;
+  }
+
+  .ProseMirror p:first-child {
+    margin-top: 0;
+  }
+
+  .ProseMirror p:last-child {
+    margin-bottom: 0;
+  }
+
+  .ProseMirror ul, .ProseMirror ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  .ProseMirror ul li {
+    list-style-type: disc;
+    margin: 0.25em 0;
+  }
+
+  .ProseMirror ol li {
+    list-style-type: decimal;
+    margin: 0.25em 0;
+  }
+
+  .ProseMirror strong {
+    font-weight: 600;
+  }
+
+  .ProseMirror em {
+    font-style: italic;
+  }
+
+  .ProseMirror u {
+    text-decoration: underline;
+  }
+
+  .ProseMirror [data-text-align="left"] {
+    text-align: left;
+  }
+
+  .ProseMirror [data-text-align="center"] {
+    text-align: center;
+  }
+
+  .ProseMirror [data-text-align="right"] {
+    text-align: right;
+  }
+
+  .ProseMirror p.is-editor-empty:first-child::before {
+    color: hsl(var(--muted-foreground));
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  /* Select Components Styles */
+  [data-radix-select-trigger] {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+
+  [data-radix-select-content] {
+    @apply bg-white dark:bg-gray-800;
+  }
+
+  [data-radix-select-item] {
+    @apply text-gray-900 dark:text-gray-100 cursor-pointer;
+  }
+
+  [data-radix-select-item]:hover {
+    @apply bg-gray-100 dark:bg-gray-700;
+  }
+
+  [data-radix-select-item][data-highlighted] {
+    @apply bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100;
+  }
+
+  [data-radix-select-value] {
+    @apply text-gray-900 dark:text-gray-100;
+  }
+}

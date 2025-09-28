@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL (opcional para desarrollo local)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: shimliadmin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - local-db
+
+  # Aplicación ShimliAdmin
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Configura estas variables según tu entorno
+      DATABASE_URL: ${DATABASE_URL}
+      SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      FROM_EMAIL: ${FROM_EMAIL}
+      FROM_NAME: ${FROM_NAME}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # Nginx para producción (opcional)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
