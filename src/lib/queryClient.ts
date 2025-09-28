@@ -19,6 +19,11 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
+  // Use simple-login for auth temporarily
+  if (url === '/api/auth/login') {
+    url = '/api/auth/simple-login';
+  }
+  
   // Build full API URL if it's an API endpoint
   const fullUrl = url.startsWith('/api/') ? buildApiUrl(url) : url;
 
