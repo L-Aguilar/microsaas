@@ -19,9 +19,9 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  // Use simple-login for auth temporarily
+  // Use supabase-login for real database authentication
   if (url === '/api/auth/login') {
-    url = '/api/auth/simple-login';
+    url = '/api/auth/supabase-login';
   }
   
   // Build full API URL if it's an API endpoint
