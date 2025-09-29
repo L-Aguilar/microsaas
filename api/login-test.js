@@ -8,27 +8,16 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-  
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
 
-  let email, password;
-  
-  // Handle different body formats
-  if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
-    const body = new URLSearchParams(req.body);
-    email = body.get('email');
-    password = body.get('password');
-  } else {
-    // Try JSON parsing
-    const body = req.body || {};
-    email = body.email;
-    password = body.password;
-  }
+  // Get credentials from query parameters for now (like test-supabase pattern)
+  const email = req.query.email || (req.body && req.body.email);
+  const password = req.query.password || (req.body && req.body.password);
 
   if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required' });
+    return res.status(400).json({ 
+      message: 'Email and password are required',
+      usage: 'Use query params: ?email=admin@bizflowcrm.com&password=yourpassword'
+    });
   }
 
   try {
@@ -37,15 +26,11 @@ export default async function handler(req, res) {
       ssl: { rejectUnauthorized: false }
     });
 
-    console.log('Attempting login for:', email);
-
     // Query user from Supabase
     const result = await pool.query(
       'SELECT * FROM users WHERE email = $1',
       [email]
     );
-
-    console.log('User found:', result.rows.length > 0);
 
     if (result.rows.length === 0) {
       await pool.end();
@@ -53,9 +38,7 @@ export default async function handler(req, res) {
     }
 
     const user = result.rows[0];
-    console.log('User role:', user.role);
 
-    // For now, we'll compare passwords directly (should use bcrypt in production)
     // Check if it's the admin with the expected password
     if (email === 'admin@bizflowcrm.com' && password === 'SecureAdmin2024!@#BizFlow') {
       await pool.end();
@@ -63,18 +46,12 @@ export default async function handler(req, res) {
       // Return user data (without password)
       const { password: _, ...userWithoutPassword } = user;
       
-      console.log('Login successful for:', email);
-      
       return res.status(200).json({
         user: userWithoutPassword,
         message: 'Login successful'
       });
     }
 
-    // If we have bcrypt, we can use this:
-    // const bcrypt = await import('bcrypt');
-    // const isValidPassword = await bcrypt.compare(password, user.password);
-    
     await pool.end();
     return res.status(401).json({ message: 'Invalid email or password' });
 

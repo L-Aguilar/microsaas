@@ -19,9 +19,9 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  // Use supabase-login for real database authentication
+  // Use login-test for real database authentication (using working pattern)
   if (url === '/api/auth/login') {
-    url = '/api/auth/supabase-login';
+    url = '/api/login-test';
   }
   
   // Build full API URL if it's an API endpoint
