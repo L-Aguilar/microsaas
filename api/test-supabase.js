@@ -9,30 +9,88 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Simple CRM data test - just companies for now
-  if (req.query.entity === 'companies') {
+  // CRM data endpoints
+  const { entity } = req.query;
+  
+  if (entity && ['companies', 'opportunities', 'users', 'activities'].includes(entity)) {
     try {
       const pool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false }
       });
 
-      const companies = await pool.query('SELECT * FROM companies LIMIT 5');
+      let query, result;
+      
+      switch (entity) {
+        case 'companies':
+          query = `
+            SELECT c.*, COUNT(o.id) as opportunities_count
+            FROM companies c
+            LEFT JOIN opportunities o ON c.id = o.company_id
+            WHERE c.business_account_id IS NOT NULL
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+            LIMIT 20
+          `;
+          result = await pool.query(query);
+          break;
+          
+        case 'opportunities':
+          query = `
+            SELECT o.*, c.name as company_name, u.name as seller_name
+            FROM opportunities o
+            LEFT JOIN companies c ON o.company_id = c.id
+            LEFT JOIN users u ON o.seller_id = u.id
+            WHERE o.business_account_id IS NOT NULL
+            ORDER BY o.created_at DESC
+            LIMIT 20
+          `;
+          result = await pool.query(query);
+          break;
+          
+        case 'users':
+          query = `
+            SELECT u.id, u.name, u.email, u.role, u.created_at, u.updated_at,
+                   ba.name as business_account_name
+            FROM users u
+            LEFT JOIN business_accounts ba ON u.business_account_id = ba.id
+            ORDER BY u.created_at DESC
+          `;
+          result = await pool.query(query);
+          break;
+          
+        case 'activities':
+          query = `
+            SELECT a.*, u.name as author_name, o.title as opportunity_title, c.name as company_name
+            FROM activities a
+            LEFT JOIN users u ON a.author_id = u.id
+            LEFT JOIN opportunities o ON a.opportunity_id = o.id
+            LEFT JOIN companies c ON o.company_id = c.id
+            WHERE a.business_account_id IS NOT NULL
+            ORDER BY a.activity_date DESC
+            LIMIT 20
+          `;
+          result = await pool.query(query);
+          break;
+          
+        default:
+          await pool.end();
+          return res.status(400).json({ message: 'Invalid entity' });
+      }
       
       await pool.end();
       return res.status(200).json({
         success: true,
-        entity: 'companies',
-        data: companies.rows,
-        total: companies.rows.length,
-        message: 'CRM endpoint working'
+        entity: entity,
+        data: result.rows,
+        total: result.rows.length
       });
 
     } catch (error) {
-      console.error('CRM error:', error);
+      console.error(`${entity} CRM error:`, error);
       return res.status(500).json({ 
         success: false,
-        message: 'CRM error',
+        message: `${entity} CRM error`,
         error: error.message 
       });
     }

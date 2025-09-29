@@ -51,7 +51,21 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const path = queryKey.join("/") as string;
+    let path = queryKey.join("/") as string;
+    
+    // Redirect API calls to working endpoints
+    if (path === '/api/companies') {
+      path = '/api/test-supabase?entity=companies';
+    } else if (path === '/api/opportunities') {
+      path = '/api/test-supabase?entity=opportunities';
+    } else if (path === '/api/users') {
+      path = '/api/test-supabase?entity=users';
+    } else if (path === '/api/activities') {
+      path = '/api/test-supabase?entity=activities';
+    } else if (path === '/api/reports/stats') {
+      path = '/api/reports';
+    }
+    
     const fullUrl = path.startsWith('/api/') ? buildApiUrl(path) : path;
     
     const res = await fetch(fullUrl, {
@@ -63,7 +77,14 @@ export const getQueryFn: <T>(options: {
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    const result = await res.json();
+    
+    // Transform data to expected format
+    if (result.data && Array.isArray(result.data)) {
+      return result.data; // Return just the data array for entity queries
+    }
+    
+    return result;
   };
 
 export const queryClient = new QueryClient({
