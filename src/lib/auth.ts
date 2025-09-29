@@ -11,8 +11,29 @@ export const SESSION_STORAGE_KEY = 'crm_session_id';
 export function getStoredUser(): User | null {
   try {
     const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : null;
-  } catch {
+    if (!stored) return null;
+    
+    const user = JSON.parse(stored);
+    
+    // DEFENSIVE: Clean any potentially invalid dates in user object
+    if (user && typeof user === 'object') {
+      Object.keys(user).forEach(key => {
+        if (key.includes('date') || key.includes('_at')) {
+          if (user[key] && typeof user[key] === 'string') {
+            const date = new Date(user[key]);
+            if (isNaN(date.getTime())) {
+              console.warn(`🗑️ Removing invalid date from user.${key}:`, user[key]);
+              delete user[key];
+            }
+          }
+        }
+      });
+    }
+    
+    return user;
+  } catch (error) {
+    console.warn('🗑️ Error parsing stored user, clearing localStorage:', error);
+    localStorage.removeItem(AUTH_STORAGE_KEY);
     return null;
   }
 }
