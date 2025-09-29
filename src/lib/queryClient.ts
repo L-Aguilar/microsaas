@@ -55,7 +55,7 @@ export const getQueryFn: <T>(options: {
     
     // Redirect API calls to working endpoints
     if (path === '/api/companies') {
-      path = '/api/test-supabase?entity=companies';
+      path = '/api/debug-frontend?test=companies';
     } else if (path === '/api/opportunities') {
       path = '/api/test-supabase?entity=opportunities';
     } else if (path === '/api/users') {
@@ -108,6 +108,8 @@ export const getQueryFn: <T>(options: {
     // Transform data to expected format
     if (result.data && Array.isArray(result.data)) {
       return cleanDates(result.data); // Return cleaned data array for entity queries
+    } else if (Array.isArray(result)) {
+      return cleanDates(result); // Direct array response (like debug-frontend)
     }
     
     return cleanDates(result);
