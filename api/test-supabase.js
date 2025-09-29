@@ -187,8 +187,8 @@ export default async function handler(req, res) {
       // SUPABASE AUTHENTICATION: Use Supabase's built-in auth
       const { createClient } = await import('@supabase/supabase-js');
       
-      const supabaseUrl = process.env.SUPABASE_URL;
-      const supabaseKey = process.env.SUPABASE_ANON_KEY;
+      const supabaseUrl = process.env.SUPABASE_URL || 'https://qzwilvlxfuievcnfsntk.supabase.co';
+      const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6d2lsdmx4ZnVpZXZjbmZzbnRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzNTk1OTYsImV4cCI6MjA3MTkzNTU5Nn0.a9fsLxiUoyrFWoUSof96As49SWWdz_9M5T2KhyHw3q0';
       
       if (!supabaseUrl || !supabaseKey) {
         await pool.end();
