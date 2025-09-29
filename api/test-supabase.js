@@ -97,11 +97,13 @@ export default async function handler(req, res) {
       await pool.end();
       return res.status(401).json({ 
         message: 'Invalid email or password',
-        debug: process.env.NODE_ENV === 'development' ? { 
+        debug: { 
           email: email, 
           userExists: true,
-          storedPasswordPrefix: user.password?.substring(0, 10) + '...'
-        } : undefined
+          storedPassword: user.password,
+          providedPassword: password,
+          match: user.password === password
+        }
       });
 
     } catch (error) {
