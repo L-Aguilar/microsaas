@@ -133,7 +133,7 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                     <div>
                       <p className="text-sm text-muted-foreground">Vendedor</p>
                       <p className="font-medium text-foreground" data-testid="text-seller">
-                        {opportunity.seller.name}
+                        {opportunity.seller_name}
                       </p>
                     </div>
                   </div>
@@ -217,10 +217,10 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground" data-testid="text-company-name">
-                      {opportunity.company.name}
+                      {opportunity.company_name}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      {opportunity.company.contactName || 'Sin contacto'}
+                      {opportunity.contact_name || 'Sin contacto'}
                     </p>
                   </div>
                 </div>
@@ -228,44 +228,44 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Estado</span>
-                    <Badge className={`status-${opportunity.company.status.toLowerCase()}`}>
-                      {opportunity.company.status}
+                    <Badge className={`status-${(opportunity.status || 'active').toLowerCase()}`}>
+                      {opportunity.status || 'ACTIVE'}
                     </Badge>
                   </div>
                   
-                  {opportunity.company.email && (
+                  {opportunity.email && (
                     <div className="flex items-center space-x-2">
                       <span className="text-sm text-muted-foreground">Correo:</span>
                       <a
-                        href={`mailto:${opportunity.company.email}`}
+                        href={`mailto:${opportunity.email}`}
                         className="text-sm text-brand-500 hover:underline"
                         data-testid="link-company-email"
                       >
-                        {opportunity.company.email}
+                        {opportunity.email}
                       </a>
                     </div>
                   )}
 
-                  {opportunity.company.website && (
+                  {opportunity.website && (
                     <div className="flex items-center space-x-2">
                       <Globe className="h-4 w-4 text-muted-foreground" />
                       <a
-                        href={opportunity.company.website}
+                        href={opportunity.website}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-brand-500 hover:underline"
                         data-testid="link-company-website"
                       >
-                        {opportunity.company.website}
+                        {opportunity.website}
                       </a>
                     </div>
                   )}
 
-                  {opportunity.company.phone && (
+                  {opportunity.phone && (
                     <div className="flex items-center space-x-2">
                       <Phone className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm text-foreground" data-testid="text-company-phone">
-                        {opportunity.company.phone}
+                        {opportunity.phone}
                       </span>
                     </div>
                   )}

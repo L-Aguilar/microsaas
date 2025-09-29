@@ -37,7 +37,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
       {/* Company */}
       <p className="text-xs text-muted-foreground mb-3 flex items-center" data-testid={`opportunity-company-${opportunity.id}`}>
         <span className="w-2 h-2 bg-primary/60 rounded-full mr-2"></span>
-        {opportunity.company.name}
+        {opportunity.company_name}
       </p>
       
       {/* Footer */}
@@ -55,7 +55,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
         
         {/* Avatar */}
         <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-medium ${getSellerColorClass(opportunity.sellerId)}`}>
-          {getSellerInitials(opportunity.seller.name)}
+          {getSellerInitials(opportunity.seller_name)}
         </div>
       </div>
     </div>

@@ -170,7 +170,7 @@ export default function Opportunities() {
     {
       key: "company",
       header: "Empresa",
-      accessor: (opportunity) => opportunity.company.name,
+      accessor: (opportunity) => opportunity.company_name,
       sortable: true,
       width: "w-1/6",
       render: (value, opportunity) => (
@@ -183,7 +183,7 @@ export default function Opportunities() {
     {
       key: "seller",
       header: "Vendedor",
-      accessor: (opportunity) => opportunity.seller.name,
+      accessor: (opportunity) => opportunity.seller_name,
       sortable: true,
       width: "w-1/6",
       render: (value, opportunity) => (
