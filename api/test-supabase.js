@@ -62,48 +62,60 @@ export default async function handler(req, res) {
 
       const user = result.rows[0];
 
-      // For development: check known credentials
-      const validCredentials = {
-        'admin@bizflowcrm.com': 'SecureAdmin2024!@#BizFlow',
-        'luis@sheilim.com': 'ApT9xqq05qGC',
-        'superadmin@crm.com': 'admin123', // Default from SQL setup
-      };
-
-      // Check if credentials match any known valid combinations
-      if (validCredentials[email] && validCredentials[email] === password) {
-        await pool.end();
+      // REAL AUTHENTICATION: Validate against actual database passwords
+      console.log('Attempting login for:', email);
+      console.log('Stored password type:', typeof user.password);
+      console.log('Stored password format:', user.password ? 'Present' : 'Missing');
+      
+      // Check if password is hashed (contains colon indicating salt:hash format)
+      const isHashedPassword = user.password && user.password.includes(':');
+      
+      if (isHashedPassword) {
+        // Handle SHA-512 + salt format: salt:hash
+        const crypto = await import('crypto');
+        const [storedSalt, storedHash] = user.password.split(':');
         
-        // Return user data (without password)
-        const { password: _, ...userWithoutPassword } = user;
+        // Create hash of provided password with stored salt
+        const providedHash = crypto.createHmac('sha512', storedSalt)
+          .update(password)
+          .digest('hex');
         
-        return res.status(200).json({
-          user: userWithoutPassword,
-          message: 'Login successful'
-        });
-      }
-
-      // If no match found, try direct password comparison (for plain text passwords)
-      if (user.password === password) {
-        await pool.end();
-        
-        const { password: _, ...userWithoutPassword } = user;
-        
-        return res.status(200).json({
-          user: userWithoutPassword,
-          message: 'Login successful - direct match'
-        });
+        if (providedHash === storedHash) {
+          await pool.end();
+          
+          const { password: _, ...userWithoutPassword } = user;
+          
+          return res.status(200).json({
+            user: userWithoutPassword,
+            message: 'Login successful - hash verified',
+            authMethod: 'database-hash'
+          });
+        }
+      } else {
+        // Handle plain text password (if any exist)
+        if (user.password === password) {
+          await pool.end();
+          
+          const { password: _, ...userWithoutPassword } = user;
+          
+          return res.status(200).json({
+            user: userWithoutPassword,
+            message: 'Login successful - plain text',
+            authMethod: 'database-plaintext'
+          });
+        }
       }
 
       await pool.end();
       return res.status(401).json({ 
-        message: 'Invalid email or password',
-        debug: { 
-          email: email, 
-          userExists: true,
-          storedPassword: user.password,
-          providedPassword: password,
-          match: user.password === password
-        }
+        message: 'Invalid email or password - credentials do not match database',
+        authMethod: 'database-validation',
+        debug: process.env.NODE_ENV !== 'production' ? { 
+          email: email,
+          hasStoredPassword: !!user.password,
+          isHashed: isHashedPassword,
+          passwordLength: user.password ? user.password.length : 0
+        } : undefined
       });
 
     } catch (error) {

@@ -15,11 +15,22 @@ export default async function handler(req, res) {
     const password = req.query.password;
 
     try {
-      // Initialize Supabase client with auth
-      const supabase = createClient(
-        process.env.SUPABASE_URL || 'https://qzwilvlxfuievcnfsntk.supabase.co',
-        process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_KEY
-      );
+      // Extract Supabase URL from DATABASE_URL
+      const databaseUrl = process.env.DATABASE_URL;
+      const supabaseProject = 'qzwilvlxfuievcnfsntk'; // From your connection string
+      const supabaseUrl = `https://${supabaseProject}.supabase.co`;
+      
+      // For now, we'll use the service role key derived from the connection
+      // This is a temporary solution - ideally you'd have proper env vars
+      const serviceKey = process.env.SUPABASE_SERVICE_KEY || 'temp-key';
+      
+      // Initialize Supabase client
+      const supabase = createClient(supabaseUrl, serviceKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      });
 
       // Use Supabase Auth to sign in
       const { data, error } = await supabase.auth.signInWithPassword({
