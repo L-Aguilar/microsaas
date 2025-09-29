@@ -19,9 +19,9 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  // Use login-v2 for real database authentication
+  // Use login-fixed for real database authentication
   if (url === '/api/auth/login') {
-    url = '/api/auth/login-v2';
+    url = '/api/login-fixed';
   }
   
   // Build full API URL if it's an API endpoint
