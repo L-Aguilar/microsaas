@@ -184,96 +184,44 @@ export default async function handler(req, res) {
 
       const user = result.rows[0];
 
-      // REAL AUTHENTICATION: Validate against actual database passwords
-      console.log('Attempting login for:', email);
-      console.log('Stored password type:', typeof user.password);
-      console.log('Stored password format:', user.password ? 'Present' : 'Missing');
+      // SUPABASE AUTHENTICATION: Use Supabase's built-in auth
+      const { createClient } = await import('@supabase/supabase-js');
       
-      // Check if password is hashed (contains colon indicating salt:hash format)
-      const isHashedPassword = user.password && user.password.includes(':');
-      const isBcryptPassword = user.password && user.password.startsWith('$2');
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_ANON_KEY;
       
-      if (isBcryptPassword) {
-        // Handle bcrypt password (common with Supabase)
-        const bcrypt = await import('bcryptjs');
-        const isValid = await bcrypt.compare(password, user.password);
-        
-        if (isValid) {
-          await pool.end();
-          
-          const { password: _, ...userWithoutPassword } = user;
-          
-          return res.status(200).json({
-            user: userWithoutPassword,
-            message: 'Login successful - bcrypt verified',
-            authMethod: 'database-bcrypt'
-          });
-        }
-      } else if (isHashedPassword) {
-        // Handle SHA-512 + salt format: salt:hash
-        const crypto = await import('crypto');
-        const [storedSalt, storedHash] = user.password.split(':');
-        
-        // Create hash of provided password with stored salt
-        const providedHash = crypto.createHmac('sha512', storedSalt)
-          .update(password)
-          .digest('hex');
-        
-        if (providedHash === storedHash) {
-          await pool.end();
-          
-          const { password: _, ...userWithoutPassword } = user;
-          
-          return res.status(200).json({
-            user: userWithoutPassword,
-            message: 'Login successful - hash verified',
-            authMethod: 'database-hash'
-          });
-        }
-      } else {
-        // Handle plain text password (if any exist)
-        if (user.password === password) {
-          await pool.end();
-          
-          const { password: _, ...userWithoutPassword } = user;
-          
-          return res.status(200).json({
-            user: userWithoutPassword,
-            message: 'Login successful - plain text',
-            authMethod: 'database-plaintext'
-          });
-        }
+      if (!supabaseUrl || !supabaseKey) {
+        await pool.end();
+        return res.status(500).json({ 
+          message: 'Supabase configuration missing',
+          error: 'SUPABASE_URL or SUPABASE_ANON_KEY not configured'
+        });
       }
-
-      // TEMPORARY TEST: If it's luis@sheilim.com, accept the original password too
-      if (email === 'luis@sheilim.com') {
-        const validPasswords = ['123456', 'password', 'admin', 'test', 'user123', 'bizflow', 'ApT9xqq05qGC'];
-        if (validPasswords.includes(password)) {
-          await pool.end();
-          
-          const { password: _, ...userWithoutPassword } = user;
-          
-          return res.status(200).json({
-            user: userWithoutPassword,
-            message: 'Login successful - temporary test',
-            authMethod: 'test-override'
-          });
-        }
+      
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      
+      // Authenticate with Supabase
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+      
+      if (authError || !authData.user) {
+        await pool.end();
+        return res.status(401).json({ 
+          message: 'Invalid email or password',
+          error: authError?.message
+        });
       }
-
+      
+      // Return the user from our database (not the auth user)
       await pool.end();
-      return res.status(401).json({ 
-        message: 'Invalid email or password - credentials do not match database',
-        authMethod: 'database-validation',
-        debug: { 
-          email: email,
-          hasStoredPassword: !!user.password,
-          isHashed: isHashedPassword,
-          isBcrypt: isBcryptPassword,
-          passwordLength: user.password ? user.password.length : 0,
-          passwordPreview: user.password ? user.password.substring(0, 20) + '...' : 'null',
-          providedPassword: password.substring(0, 5) + '...'
-        }
+      const { password: _, ...userWithoutPassword } = user;
+      
+      return res.status(200).json({
+        user: userWithoutPassword,
+        message: 'Login successful - Supabase auth',
+        authMethod: 'supabase-auth'
       });
 
     } catch (error) {
