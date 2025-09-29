@@ -53,17 +53,17 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     let path = queryKey.join("/") as string;
     
-    // Redirect API calls to FAKE DATA (no database, no dates)
+    // Redirect API calls to REAL CRM DATA from Supabase
     if (path === '/api/companies') {
-      path = '/api/debug-frontend?test=fake-companies';
+      path = '/api/test-supabase?entity=companies';
     } else if (path === '/api/opportunities') {
-      path = '/api/debug-frontend?test=simple'; // Simple data for now
+      path = '/api/test-supabase?entity=opportunities';
     } else if (path === '/api/users') {
-      path = '/api/debug-frontend?test=simple'; // Simple data for now
+      path = '/api/test-supabase?entity=users';
     } else if (path === '/api/activities') {
-      path = '/api/debug-frontend?test=simple'; // Simple data for now
+      path = '/api/test-supabase?entity=activities';
     } else if (path === '/api/reports/stats') {
-      path = '/api/debug-frontend?test=stats';
+      path = '/api/reports';
     }
     
     const fullUrl = path.startsWith('/api/') ? buildApiUrl(path) : path;
