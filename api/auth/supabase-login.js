@@ -13,47 +13,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  // Debug: log everything about the request
-  console.log('=== REQUEST DEBUG ===');
-  console.log('Method:', req.method);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Body type:', typeof req.body);
-  console.log('Body value:', req.body);
-  console.log('Body as string:', String(req.body));
-  
-  // Try different ways to get the body
-  let email, password;
-  
-  // Try direct access
-  if (req.body && typeof req.body === 'object') {
-    email = req.body.email;
-    password = req.body.password;
-    console.log('Method 1 - Direct object access:', { email: !!email, password: !!password });
-  }
-  
-  // If that didn't work, try parsing as JSON string
+  const { email, password } = req.body || {};
+
   if (!email || !password) {
-    try {
-      const parsed = JSON.parse(req.body);
-      email = parsed.email;
-      password = parsed.password;
-      console.log('Method 2 - JSON.parse:', { email: !!email, password: !!password });
-    } catch (e) {
-      console.log('JSON parse failed:', e.message);
-    }
-  }
-  
-  // Last resort: return debug info
-  if (!email || !password) {
-    return res.status(400).json({ 
-      message: 'Email and password are required',
-      debug: {
-        bodyType: typeof req.body,
-        bodyValue: req.body,
-        bodyString: String(req.body),
-        headers: req.headers
-      }
-    });
+    return res.status(400).json({ message: 'Email and password are required' });
   }
 
   try {
