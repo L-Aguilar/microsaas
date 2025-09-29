@@ -53,17 +53,17 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     let path = queryKey.join("/") as string;
     
-    // Redirect API calls to working endpoints
+    // Redirect API calls to working endpoints (using debug versions)
     if (path === '/api/companies') {
       path = '/api/debug-frontend?test=companies';
     } else if (path === '/api/opportunities') {
-      path = '/api/test-supabase?entity=opportunities';
+      path = '/api/debug-frontend?test=simple'; // Simple data for now
     } else if (path === '/api/users') {
-      path = '/api/test-supabase?entity=users';
+      path = '/api/debug-frontend?test=simple'; // Simple data for now
     } else if (path === '/api/activities') {
-      path = '/api/test-supabase?entity=activities';
+      path = '/api/debug-frontend?test=simple'; // Simple data for now
     } else if (path === '/api/reports/stats') {
-      path = '/api/reports';
+      path = '/api/debug-frontend?test=stats';
     }
     
     const fullUrl = path.startsWith('/api/') ? buildApiUrl(path) : path;

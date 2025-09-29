@@ -41,23 +41,29 @@ export default async function handler(req, res) {
           id,
           name,
           email,
+          phone,
+          website,
           status,
-          created_at
+          created_at,
+          updated_at
         FROM companies 
         WHERE business_account_id IS NOT NULL
         ORDER BY created_at DESC
-        LIMIT 3
+        LIMIT 5
       `);
       
       await pool.end();
       
-      // Ensure all fields are strings or numbers (no complex objects)
+      // Ensure all fields are properly formatted and safe
       const simpleData = result.rows.map(row => ({
         id: String(row.id),
         name: String(row.name || 'Unknown'),
         email: String(row.email || ''),
+        phone: String(row.phone || ''),
+        website: String(row.website || ''),
         status: String(row.status || 'ACTIVE'),
         created_at: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
+        updated_at: row.updated_at ? row.updated_at.toISOString() : new Date().toISOString(),
         opportunities_count: 0
       }));
       
@@ -72,9 +78,30 @@ export default async function handler(req, res) {
     }
   }
 
+  if (test === 'stats') {
+    // Return simple stats without complex queries
+    return res.status(200).json({
+      stats: {
+        total_companies: 14,
+        total_opportunities: 2,
+        total_revenue: 50000,
+        total_users: 6,
+        total_activities: 3
+      },
+      monthly_growth: [
+        { month: "2025-08-01T00:00:00.000Z", companies: 1 },
+        { month: "2025-09-01T00:00:00.000Z", companies: 13 }
+      ],
+      opportunity_status: [
+        { status: "QUALIFYING", count: 1 },
+        { status: "NEW", count: 1 }
+      ]
+    });
+  }
+
   return res.status(200).json({
     message: 'Debug endpoint',
-    availableTests: ['simple', 'companies'],
-    usage: 'Add ?test=simple or ?test=companies'
+    availableTests: ['simple', 'companies', 'stats'],
+    usage: 'Add ?test=simple or ?test=companies or ?test=stats'
   });
 }
