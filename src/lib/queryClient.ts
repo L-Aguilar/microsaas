@@ -15,13 +15,20 @@ export async function apiRequest(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   
+  // Special handling for login to use query parameters
+  if (url === '/api/auth/login' && data && typeof data === 'object' && data !== null) {
+    const loginData = data as { email: string; password: string };
+    const queryParams = new URLSearchParams({
+      email: loginData.email,
+      password: loginData.password
+    });
+    url = `/api/test-supabase?${queryParams.toString()}`;
+    method = 'GET';
+    data = undefined; // Clear data since we're using query params
+  }
+  
   if (data) {
     headers["Content-Type"] = "application/json";
-  }
-
-  // Use login-test for real database authentication (using working pattern)
-  if (url === '/api/auth/login') {
-    url = '/api/login-test';
   }
   
   // Build full API URL if it's an API endpoint
