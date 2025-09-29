@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Debug user lookup endpoint FIRST
+  // Debug endpoints
   if (req.query.debug === 'users') {
     try {
       const pool = new Pool({
@@ -30,6 +30,47 @@ export default async function handler(req, res) {
       
     } catch (error) {
       console.error('Debug users error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  // Debug auth users from Supabase Auth
+  if (req.query.debug === 'auth') {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      
+      const supabaseUrl = process.env.SUPABASE_URL || 'https://qzwilvlxfuievcnfsntk.supabase.co';
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      
+      if (!supabaseServiceKey) {
+        return res.status(500).json({ 
+          message: 'Need SUPABASE_SERVICE_ROLE_KEY to list auth users'
+        });
+      }
+      
+      const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+      
+      const { data: { users }, error } = await supabase.auth.admin.listUsers();
+      
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        authUsers: users?.map(user => ({
+          id: user.id,
+          email: user.email,
+          created_at: user.created_at,
+          email_confirmed_at: user.email_confirmed_at,
+          last_sign_in_at: user.last_sign_in_at
+        })) || []
+      });
+      
+    } catch (error) {
+      console.error('Debug auth error:', error);
       return res.status(500).json({ error: error.message });
     }
   }
@@ -200,16 +241,43 @@ export default async function handler(req, res) {
       
       const supabase = createClient(supabaseUrl, supabaseKey);
       
-      // Authenticate with Supabase
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      // Try to authenticate with Supabase
+      let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password
       });
       
+      // If user doesn't exist, try to create them
+      if (authError && authError.message === 'Invalid login credentials') {
+        console.log('User does not exist in Auth, attempting to create...');
+        
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: email,
+          password: password
+        });
+        
+        if (signUpError) {
+          await pool.end();
+          return res.status(401).json({ 
+            message: 'Could not create or authenticate user',
+            error: signUpError.message
+          });
+        }
+        
+        // Try to sign in again after creating
+        const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
+          email: email,
+          password: password
+        });
+        
+        authData = retryAuthData;
+        authError = retryAuthError;
+      }
+      
       if (authError || !authData.user) {
         await pool.end();
         return res.status(401).json({ 
-          message: 'Invalid email or password',
+          message: 'Authentication failed',
           error: authError?.message
         });
       }
