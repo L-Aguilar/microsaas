@@ -27,13 +27,14 @@ export default async function handler(req, res) {
       pool.query('SELECT COUNT(*) as count FROM activities WHERE business_account_id IS NOT NULL')
     ]);
 
-    // Get monthly growth data
+    // Get monthly growth data with date validation
     const monthlyData = await pool.query(`
       SELECT 
         DATE_TRUNC('month', created_at) as month,
         COUNT(*) as companies_added
       FROM companies 
       WHERE business_account_id IS NOT NULL 
+        AND created_at IS NOT NULL
         AND created_at >= NOW() - INTERVAL '12 months'
       GROUP BY DATE_TRUNC('month', created_at)
       ORDER BY month

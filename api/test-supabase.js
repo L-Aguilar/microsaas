@@ -61,7 +61,16 @@ export default async function handler(req, res) {
           
         case 'activities':
           query = `
-            SELECT a.*, u.name as author_name, o.title as opportunity_title, c.name as company_name
+            SELECT 
+              a.*,
+              u.name as author_name, 
+              o.title as opportunity_title, 
+              c.name as company_name,
+              COALESCE(a.activity_date, a.created_at) as activity_date,
+              CASE 
+                WHEN a.reminder_date IS NULL THEN NULL
+                ELSE a.reminder_date
+              END as reminder_date
             FROM activities a
             LEFT JOIN users u ON a.author_id = u.id
             LEFT JOIN opportunities o ON a.opportunity_id = o.id
@@ -79,11 +88,37 @@ export default async function handler(req, res) {
       }
       
       await pool.end();
+      
+      // Clean up any invalid dates in the response
+      const cleanedData = result.rows.map(row => {
+        const cleaned = { ...row };
+        
+        // Check all properties for date fields and clean them
+        Object.keys(cleaned).forEach(key => {
+          if (key.includes('date') || key.includes('_at')) {
+            if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
+              // Keep as null for explicit null dates
+              cleaned[key] = null;
+            } else if (typeof cleaned[key] === 'string') {
+              // Validate if it's a valid date string
+              const date = new Date(cleaned[key]);
+              if (isNaN(date.getTime())) {
+                // Invalid date, set to null
+                console.warn(`Invalid date found in ${entity}.${key}:`, cleaned[key]);
+                cleaned[key] = null;
+              }
+            }
+          }
+        });
+        
+        return cleaned;
+      });
+      
       return res.status(200).json({
         success: true,
         entity: entity,
-        data: result.rows,
-        total: result.rows.length
+        data: cleanedData,
+        total: cleanedData.length
       });
 
     } catch (error) {

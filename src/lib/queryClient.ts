@@ -79,12 +79,38 @@ export const getQueryFn: <T>(options: {
     await throwIfResNotOk(res);
     const result = await res.json();
     
+    // Clean up date fields to prevent Invalid time value errors
+    const cleanDates = (obj: any): any => {
+      if (Array.isArray(obj)) {
+        return obj.map(cleanDates);
+      } else if (obj && typeof obj === 'object') {
+        const cleaned = { ...obj };
+        Object.keys(cleaned).forEach(key => {
+          if (key.includes('date') || key.includes('_at')) {
+            if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
+              cleaned[key] = null;
+            } else if (typeof cleaned[key] === 'string') {
+              const date = new Date(cleaned[key]);
+              if (isNaN(date.getTime())) {
+                console.warn(`Invalid date in frontend:`, key, cleaned[key]);
+                cleaned[key] = null;
+              }
+            }
+          } else if (typeof cleaned[key] === 'object') {
+            cleaned[key] = cleanDates(cleaned[key]);
+          }
+        });
+        return cleaned;
+      }
+      return obj;
+    };
+    
     // Transform data to expected format
     if (result.data && Array.isArray(result.data)) {
-      return result.data; // Return just the data array for entity queries
+      return cleanDates(result.data); // Return cleaned data array for entity queries
     }
     
-    return result;
+    return cleanDates(result);
   };
 
 export const queryClient = new QueryClient({
