@@ -53,9 +53,9 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     let path = queryKey.join("/") as string;
     
-    // Redirect API calls to working endpoints (using debug versions)
+    // Redirect API calls to FAKE DATA (no database, no dates)
     if (path === '/api/companies') {
-      path = '/api/debug-frontend?test=companies';
+      path = '/api/debug-frontend?test=fake-companies';
     } else if (path === '/api/opportunities') {
       path = '/api/debug-frontend?test=simple'; // Simple data for now
     } else if (path === '/api/users') {

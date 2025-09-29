@@ -12,20 +12,60 @@ export default async function handler(req, res) {
   const { test } = req.query;
 
   if (test === 'simple') {
-    // Return minimal test data
-    return res.status(200).json({
-      success: true,
-      message: 'Simple endpoint working',
-      data: [
-        {
-          id: '1',
-          name: 'Test Company',
-          created_at: '2025-09-29T15:00:00.000Z',
-          opportunities_count: 0
-        }
-      ],
-      total: 1
-    });
+    // Return minimal test data WITHOUT DATES
+    return res.status(200).json([
+      {
+        id: '1',
+        name: 'Test Company 1',
+        email: 'test1@example.com',
+        phone: '+1234567890',
+        website: 'https://example.com',
+        status: 'ACTIVE',
+        opportunities_count: 0
+      },
+      {
+        id: '2',
+        name: 'Test Company 2',
+        email: 'test2@example.com',
+        phone: '+1234567891',
+        website: 'https://example2.com',
+        status: 'LEAD',
+        opportunities_count: 1
+      }
+    ]);
+  }
+
+  if (test === 'fake-companies') {
+    // Return completely fake data without database
+    return res.status(200).json([
+      {
+        id: 'fake-1',
+        name: 'Fake Company Alpha',
+        email: 'fake@alpha.com',
+        phone: '+1111111111',
+        website: 'https://alpha.fake',
+        status: 'ACTIVE',
+        opportunities_count: 5
+      },
+      {
+        id: 'fake-2',
+        name: 'Fake Company Beta',
+        email: 'fake@beta.com',
+        phone: '+2222222222',
+        website: 'https://beta.fake',
+        status: 'LEAD',
+        opportunities_count: 3
+      },
+      {
+        id: 'fake-3',
+        name: 'Fake Company Gamma',
+        email: 'fake@gamma.com',
+        phone: '+3333333333',
+        website: 'https://gamma.fake',
+        status: 'INACTIVE',
+        opportunities_count: 0
+      }
+    ]);
   }
 
   if (test === 'companies') {
@@ -54,7 +94,7 @@ export default async function handler(req, res) {
       
       await pool.end();
       
-      // Ensure all fields are properly formatted and safe
+      // ULTRA SAFE - Remove ALL dates to isolate the problem
       const simpleData = result.rows.map(row => ({
         id: String(row.id),
         name: String(row.name || 'Unknown'),
@@ -62,8 +102,8 @@ export default async function handler(req, res) {
         phone: String(row.phone || ''),
         website: String(row.website || ''),
         status: String(row.status || 'ACTIVE'),
-        created_at: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
-        updated_at: row.updated_at ? row.updated_at.toISOString() : new Date().toISOString(),
+        // created_at: "2025-09-29T15:00:00.000Z", // Fixed safe date
+        // updated_at: "2025-09-29T15:00:00.000Z", // Fixed safe date
         opportunities_count: 0
       }));
       
@@ -99,9 +139,26 @@ export default async function handler(req, res) {
     });
   }
 
+  if (test === 'fake-login') {
+    // Return fake user data without problematic dates
+    return res.status(200).json({
+      user: {
+        id: 'fake-user-123',
+        name: 'Fake User',
+        email: 'fake@example.com',
+        role: 'BUSINESS_PLAN',
+        business_account_id: 'fake-account-456',
+        phone: '+1234567890'
+        // NO created_at, updated_at or any dates!
+      },
+      message: 'Fake login successful',
+      authMethod: 'fake-auth'
+    });
+  }
+
   return res.status(200).json({
     message: 'Debug endpoint',
-    availableTests: ['simple', 'companies', 'stats'],
+    availableTests: ['simple', 'companies', 'stats', 'fake-companies', 'fake-login'],
     usage: 'Add ?test=simple or ?test=companies or ?test=stats'
   });
 }
