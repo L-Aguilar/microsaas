@@ -50,7 +50,12 @@ export function useBusinessAccountHasModule(moduleType: string) {
   // Create a specific endpoint for getting user's own business account modules
   const { data: userBusinessAccountModules } = useQuery<{ type: string; isEnabled: boolean }[]>({
     queryKey: ["/api/user/business-account/modules"],
-    enabled: !!user && user.role !== 'SUPER_ADMIN' && !!user.businessAccountId,
+    queryFn: async () => {
+      const response = await fetch('/api/user/business-account/modules');
+      if (!response.ok) throw new Error('Failed to fetch modules');
+      return response.json();
+    },
+    enabled: !!user && user.role !== 'SUPER_ADMIN' && !!(user.businessAccountId || user.business_account_id),
     retry: false,
   });
 
