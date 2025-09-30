@@ -48,11 +48,21 @@ export async function apiRequest(
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
-  user?: any;
 }) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior, user }) =>
+  ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     let path = queryKey.join("/") as string;
+    
+    // Get current user from localStorage for authorization
+    let user = null;
+    try {
+      const storedUser = localStorage.getItem('crm_auth_user');
+      if (storedUser) {
+        user = JSON.parse(storedUser);
+      }
+    } catch (error) {
+      console.warn('Error getting user from localStorage:', error);
+    }
     
     // Build authorization parameters from user data
     const authParams = new URLSearchParams();
@@ -106,29 +116,38 @@ export const getQueryFn: <T>(options: {
       return obj;
     };
     
+    // DEBUG: Log the result structure
+    console.log('API Response for path:', path, 'Result:', result);
+    
     // Transform data to expected format
     if (result.data && Array.isArray(result.data)) {
+      console.log('Returning result.data array');
       return cleanDates(result.data); // Return cleaned data array for entity queries
     } else if (Array.isArray(result)) {
+      console.log('Returning direct array');
       return cleanDates(result); // Direct array response (like debug-frontend)
     } else if (result.success && result.companies && Array.isArray(result.companies)) {
+      console.log('Returning result.companies array');
       return cleanDates(result.companies); // New API structure for companies
     } else if (result.success && result.opportunities && Array.isArray(result.opportunities)) {
+      console.log('Returning result.opportunities array');
       return cleanDates(result.opportunities); // New API structure for opportunities
     } else if (result.success && result.users && Array.isArray(result.users)) {
+      console.log('Returning result.users array');
       return cleanDates(result.users); // New API structure for users
     } else if (result.success && result.activities && Array.isArray(result.activities)) {
+      console.log('Returning result.activities array');
       return cleanDates(result.activities); // New API structure for activities
     }
     
+    console.log('Returning full result object');
     return cleanDates(result);
   };
 
-// Function to create queryClient with user context
-export const createQueryClient = (user?: any) => new QueryClient({
+export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn({ on401: "throw", user }),
+      queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: 0, // NO CACHE
@@ -141,6 +160,3 @@ export const createQueryClient = (user?: any) => new QueryClient({
     },
   },
 });
-
-// Default queryClient for backward compatibility
-export const queryClient = createQueryClient();
