@@ -11,7 +11,9 @@ import { CURRENT_THEME } from "@shared/theme-config";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
+import StaticDashboard from "@/pages/static-dashboard";
 import Companies from "@/pages/companies";
+import StaticCompanies from "@/pages/static-companies";
 import CompanyDetail from "@/pages/company-detail";
 import Opportunities from "@/pages/opportunities";
 import OpportunityDetail from "@/pages/opportunity-detail";
@@ -65,12 +67,7 @@ function DashboardRoute() {
       onNewOpportunity={() => setShowNewOpportunityModal(true)}
       onNewCompany={() => setShowNewCompanyModal(true)}
     >
-      <Dashboard 
-        showNewOpportunityModal={showNewOpportunityModal}
-        setShowNewOpportunityModal={setShowNewOpportunityModal}
-        showNewCompanyModal={showNewCompanyModal}
-        setShowNewCompanyModal={setShowNewCompanyModal}
-      />
+      <StaticDashboard />
     </ProtectedRoute>
   );
 }
@@ -85,7 +82,7 @@ function Router() {
       </Route>
       <Route path="/companies">
         <ProtectedRoute>
-          <Companies />
+          <StaticCompanies />
         </ProtectedRoute>
       </Route>
       <Route path="/companies/:id">
