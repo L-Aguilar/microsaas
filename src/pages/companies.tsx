@@ -12,7 +12,7 @@ import CompanyForm from "@/components/forms/company-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DataTable, Column } from "@/components/ui/data-table";
-import { safeFormatTimestamp } from "@/lib/safe-dates";
+import { formatSafeDate } from "@/lib/custom-dates";
 
 export default function Companies() {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -156,7 +156,7 @@ export default function Companies() {
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {value || 'N/A'}
+          {formatSafeDate(value)}
         </span>
       ),
     },

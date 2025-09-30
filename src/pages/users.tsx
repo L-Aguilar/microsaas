@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth";
 import UserForm from "@/components/forms/user-form";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import { safeFormatTimestamp } from "@/lib/safe-dates";
+import { formatSafeDate } from "@/lib/custom-dates";
 
 export default function UsersPage() {
   const [showNewUserModal, setShowNewUserModal] = useState(false);
@@ -158,7 +158,7 @@ export default function UsersPage() {
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {value || 'N/A'}
+          {formatSafeDate(value)}
         </span>
       ),
     },

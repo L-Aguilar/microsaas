@@ -11,8 +11,7 @@ import { OpportunityWithRelations, CompanyWithRelations, User as UserType } from
 import OpportunityForm from "@/components/forms/opportunity-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "@/lib/custom-dates";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { DateRangeFilter } from "@/components/ui/date-range-filter";
 

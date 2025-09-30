@@ -21,8 +21,7 @@ import { OpportunityWithRelations, ActivityWithRelations } from "@shared/schema"
 import ActivityForm from "@/components/forms/activity-form";
 import ActivityItem from "@/components/activity/activity-item";
 import HtmlContent from "@/components/ui/html-content";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate, sortByDate } from "@/lib/custom-dates";
 
 interface OpportunityDetailProps {
   opportunityId: string;
@@ -87,10 +86,8 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
     ON_HOLD: "En Espera",
   };
 
-  // Sort activities by creation date (most recent first) 
-  const sortedActivities = [...activities].sort(
-    (a, b) => (b.id || '').localeCompare(a.id || '') // Sort by ID instead of date
-  );
+  // Sort activities by creation date (most recent first)
+  const sortedActivities = sortByDate(activities, (activity) => activity.created_at);
 
   return (
     <>
@@ -142,7 +139,7 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                     <div>
                       <p className="text-sm text-muted-foreground">Fecha de Creación</p>
                       <p className="font-medium text-foreground" data-testid="text-creation-date">
-                        {opportunity.estimated_close_date || 'Sin fecha definida'}
+                        {formatSafeDate(opportunity.estimated_close_date, 'long')}
                       </p>
                     </div>
                   </div>
@@ -286,14 +283,14 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Fecha de Creación</span>
                   <span className="text-sm font-medium text-foreground">
-                    {opportunity.created_at || 'N/A'}
+                    {formatSafeDate(opportunity.created_at)}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Última Actualización</span>
                   <span className="text-sm font-medium text-foreground">
-                    {opportunity.updated_at || 'N/A'}
+                    {formatSafeDate(opportunity.updated_at)}
                   </span>
                 </div>
               </CardContent>

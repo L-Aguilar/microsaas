@@ -1,7 +1,6 @@
 import { Calendar } from "lucide-react";
 import { OpportunityWithRelations } from "@shared/schema";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "@/lib/custom-dates";
 
 interface OpportunityCardProps {
   opportunity: OpportunityWithRelations;
@@ -48,7 +47,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
         <div className="flex items-center text-xs text-muted-foreground">
           <Calendar className="mr-1.5 h-3 w-3" />
           <span>
-            Sin fecha
+            {formatSafeDate(opportunity.estimated_close_date, 'short')}
           </span>
         </div>
         

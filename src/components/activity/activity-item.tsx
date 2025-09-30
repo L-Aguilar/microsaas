@@ -1,6 +1,5 @@
 import { ActivityWithRelations } from "@shared/schema";
-import { formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "@/lib/custom-dates";
 import HtmlContent from "@/components/ui/html-content";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -32,10 +31,7 @@ export default function ActivityItem({
   showBorder = false 
 }: ActivityItemProps) {
   const [location, setLocation] = useLocation();
-  const timeAgo = formatDistanceToNow(new Date(activity.createdAt), {
-    addSuffix: true,
-    locale: es,
-  });
+  const timeAgo = formatSafeDate(activity.created_at) + ' (actividad)';
 
   // Verificar si estamos dentro de la oportunidad actual
   const isInsideOpportunity = location.includes(`/opportunities/${activity.opportunityId}`);
