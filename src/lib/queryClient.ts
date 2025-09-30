@@ -111,6 +111,14 @@ export const getQueryFn: <T>(options: {
       return cleanDates(result.data); // Return cleaned data array for entity queries
     } else if (Array.isArray(result)) {
       return cleanDates(result); // Direct array response (like debug-frontend)
+    } else if (result.success && result.companies && Array.isArray(result.companies)) {
+      return cleanDates(result.companies); // New API structure for companies
+    } else if (result.success && result.opportunities && Array.isArray(result.opportunities)) {
+      return cleanDates(result.opportunities); // New API structure for opportunities
+    } else if (result.success && result.users && Array.isArray(result.users)) {
+      return cleanDates(result.users); // New API structure for users
+    } else if (result.success && result.activities && Array.isArray(result.activities)) {
+      return cleanDates(result.activities); // New API structure for activities
     }
     
     return cleanDates(result);
