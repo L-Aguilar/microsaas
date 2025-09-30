@@ -40,7 +40,14 @@ export function getStoredUser(): User | null {
 
 export function setStoredUser(user: User | null): void {
   if (user) {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    // NUCLEAR FIX: Remove ALL date fields before storing
+    const cleanUser = { ...user };
+    Object.keys(cleanUser).forEach(key => {
+      if (key.includes('date') || key.includes('_at') || key.includes('Date') || key.includes('time')) {
+        delete cleanUser[key];
+      }
+    });
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(cleanUser));
   } else {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   }

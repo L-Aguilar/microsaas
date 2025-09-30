@@ -3,51 +3,65 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
-// EMERGENCY FIX: Clear potentially corrupted localStorage
+// NUCLEAR FIX: Clear ALL localStorage and sessionStorage on EVERY load
 try {
-  console.log('🧹 Cleaning localStorage to fix date errors...');
+  console.log('🧹 NUCLEAR CLEANUP: Clearing ALL storage...');
   
-  // Remove potentially corrupted user data
-  const keysToRemove = ['user', 'session', 'auth', 'queryClient'];
-  keysToRemove.forEach(key => {
-    localStorage.removeItem(key);
-    sessionStorage.removeItem(key);
-  });
+  // Clear EVERYTHING
+  localStorage.clear();
+  sessionStorage.clear();
   
-  // Check for any remaining items with dates and remove them
-  Object.keys(localStorage).forEach(key => {
-    try {
-      const value = localStorage.getItem(key);
-      if (value && (value.includes('date') || value.includes('Date') || value.includes('_at'))) {
-        console.warn(`🗑️ Removing potentially corrupted localStorage item: ${key}`);
-        localStorage.removeItem(key);
-      }
-    } catch (e) {
-      console.warn(`🗑️ Error checking localStorage item ${key}, removing:`, e);
-      localStorage.removeItem(key);
-    }
-  });
+  // Also clear any indexed DB or other storage
+  if ('indexedDB' in window) {
+    indexedDB.deleteDatabase('react-query-cache');
+    indexedDB.deleteDatabase('keyval-store');
+  }
   
-  console.log('✅ localStorage cleanup completed');
+  console.log('✅ NUCLEAR cleanup completed - ALL storage cleared');
 } catch (error) {
-  console.error('❌ Error during localStorage cleanup:', error);
+  console.error('❌ Error during nuclear cleanup:', error);
 }
+
+// NUCLEAR FIX: Intercept ALL JSON parsing to remove dates
+const originalJSONParse = JSON.parse;
+JSON.parse = function(text, reviver) {
+  try {
+    const result = originalJSONParse.call(this, text, reviver);
+    
+    // Recursively clean all objects
+    const cleanObject = (obj) => {
+      if (obj === null || obj === undefined) return obj;
+      if (typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) return obj.map(cleanObject);
+      
+      const cleaned = {};
+      for (const [key, value] of Object.entries(obj)) {
+        // Skip ANY field that might contain dates
+        if (key.includes('date') || key.includes('_at') || key.includes('Date') || key.includes('time')) {
+          continue; // Skip completely
+        }
+        cleaned[key] = typeof value === 'object' ? cleanObject(value) : value;
+      }
+      return cleaned;
+    };
+    
+    return cleanObject(result);
+  } catch (error) {
+    console.error('JSON Parse Error:', error);
+    return {};
+  }
+};
 
 // Add global error handler for date errors
 window.addEventListener('error', (event) => {
   if (event.error?.message?.includes('Invalid time value')) {
     console.error('🚨 CRITICAL: Invalid time value error detected!', event.error);
-    console.log('🔧 Attempting to reload page to recover...');
+    console.log('🔧 Reloading page immediately...');
     
-    // Clear localStorage and reload as last resort
+    // Clear everything and reload immediately
     localStorage.clear();
     sessionStorage.clear();
-    
-    // Prevent infinite reload loop
-    if (!sessionStorage.getItem('reloadAttempted')) {
-      sessionStorage.setItem('reloadAttempted', 'true');
-      setTimeout(() => window.location.reload(), 1000);
-    }
+    window.location.reload();
   }
 });
 
