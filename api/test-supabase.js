@@ -155,14 +155,30 @@ export default async function handler(req, res) {
       
       await pool.end();
       
-      // AGGRESSIVE FIX: Remove ALL date fields completely to prevent crashes
+      // SAFE DATE FIX: Convert all dates to Unix timestamps (numbers)
       const cleanedData = result.rows.map(row => {
         const cleaned = { ...row };
         
-        // Remove ALL date fields completely
+        // Convert date fields to safe Unix timestamps
         Object.keys(cleaned).forEach(key => {
           if (key.includes('date') || key.includes('_at')) {
-            delete cleaned[key]; // Remove the field entirely
+            if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
+              cleaned[key] = null;
+            } else {
+              try {
+                const date = new Date(cleaned[key]);
+                if (isNaN(date.getTime())) {
+                  // Invalid date, set to current time as fallback
+                  cleaned[key] = Math.floor(Date.now() / 1000);
+                } else {
+                  // Convert to Unix timestamp (seconds since epoch)
+                  cleaned[key] = Math.floor(date.getTime() / 1000);
+                }
+              } catch (error) {
+                // If conversion fails, use current time
+                cleaned[key] = Math.floor(Date.now() / 1000);
+              }
+            }
           }
         });
         

@@ -67,7 +67,12 @@ function DashboardRoute() {
       onNewOpportunity={() => setShowNewOpportunityModal(true)}
       onNewCompany={() => setShowNewCompanyModal(true)}
     >
-      <StaticDashboard />
+      <Dashboard 
+        showNewOpportunityModal={showNewOpportunityModal}
+        setShowNewOpportunityModal={setShowNewOpportunityModal}
+        showNewCompanyModal={showNewCompanyModal}
+        setShowNewCompanyModal={setShowNewCompanyModal}
+      />
     </ProtectedRoute>
   );
 }
@@ -82,7 +87,7 @@ function Router() {
       </Route>
       <Route path="/companies">
         <ProtectedRoute>
-          <StaticCompanies />
+          <Companies />
         </ProtectedRoute>
       </Route>
       <Route path="/companies/:id">

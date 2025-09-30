@@ -12,8 +12,7 @@ import CompanyForm from "@/components/forms/company-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DataTable, Column } from "@/components/ui/data-table";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { safeFormatTimestamp } from "@/lib/safe-dates";
 
 export default function Companies() {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -152,12 +151,12 @@ export default function Companies() {
     {
       key: "createdAt",
       header: "Fecha de Creación",
-      accessor: (company) => "N/A",
-      sortable: false,
+      accessor: (company) => company.created_at,
+      sortable: true,
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          N/A
+          {safeFormatTimestamp(value)}
         </span>
       ),
     },
