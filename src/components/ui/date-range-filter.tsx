@@ -86,7 +86,6 @@ export function DateRangeFilter({
             }
           }}
           numberOfMonths={2}
-          locale={es}
         />
       </PopoverContent>
     </Popover>

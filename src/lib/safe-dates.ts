@@ -1,5 +1,4 @@
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "./custom-dates";
 
 /**
  * Safely creates a Date object from a Unix timestamp
@@ -31,7 +30,7 @@ export function safeTimestampToDate(timestamp: number | null | undefined): Date 
 /**
  * Safely formats a Unix timestamp
  * @param timestamp Unix timestamp (seconds since epoch) or null
- * @param formatString Format string for date-fns
+ * @param formatString Ignored - always uses dd/MM/yyyy format
  * @param fallback Fallback string if date is invalid
  * @returns Formatted date string
  */
@@ -40,16 +39,16 @@ export function safeFormatTimestamp(
   formatString: string = 'dd/MM/yyyy',
   fallback: string = 'N/A'
 ): string {
-  const date = safeTimestampToDate(timestamp);
-  
-  if (!date) {
+  if (timestamp === null || timestamp === undefined) {
     return fallback;
   }
   
   try {
-    return format(date, formatString, { locale: es });
+    // Convert Unix timestamp to date
+    const date = new Date(timestamp * 1000);
+    return formatSafeDate(date);
   } catch (error) {
-    console.warn('Error formatting date:', date, error);
+    console.warn('Error formatting timestamp:', timestamp, error);
     return fallback;
   }
 }
