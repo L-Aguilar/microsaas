@@ -154,12 +154,12 @@ export default function UsersPage() {
     {
       key: "createdAt",
       header: "Fecha de Creación",
-      accessor: (user) => user.createdAt,
-      sortable: true,
+      accessor: (user) => "N/A",
+      sortable: false,
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {format(new Date(value), 'dd/MM/yyyy', { locale: es })}
+          N/A
         </span>
       ),
     },

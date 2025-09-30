@@ -110,11 +110,11 @@ export default function BusinessAccountDetailPage() {
     {
       key: "createdAt",
       header: "Fecha Registro",
-      accessor: (user) => user.createdAt,
-      sortable: true,
+      accessor: (user) => "N/A",
+      sortable: false,
       width: "w-1/6",
       render: (value) => (
-        value ? format(new Date(value), "dd/MM/yyyy", { locale: es }) : '-'
+        'N/A'
       ),
     },
     {
@@ -197,11 +197,11 @@ export default function BusinessAccountDetailPage() {
     {
       key: "createdAt",
       header: "Fecha Registro",
-      accessor: (company) => company.createdAt,
-      sortable: true,
+      accessor: (company) => "N/A",
+      sortable: false,
       width: "w-1/6",
       render: (value) => (
-        value ? format(new Date(value), "dd/MM/yyyy", { locale: es }) : '-'
+        'N/A'
       ),
     },
     {

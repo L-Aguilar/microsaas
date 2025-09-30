@@ -48,10 +48,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
         <div className="flex items-center text-xs text-muted-foreground">
           <Calendar className="mr-1.5 h-3 w-3" />
           <span>
-            {opportunity.estimatedCloseDate
-              ? format(new Date(opportunity.estimatedCloseDate), "dd MMM", { locale: es })
-              : "Sin fecha"
-            }
+            Sin fecha
           </span>
         </div>
         

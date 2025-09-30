@@ -152,12 +152,12 @@ export default function Companies() {
     {
       key: "createdAt",
       header: "Fecha de Creación",
-      accessor: (company) => company.createdAt,
-      sortable: true,
+      accessor: (company) => "N/A",
+      sortable: false,
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {format(new Date(value), 'dd/MM/yyyy', { locale: es })}
+          N/A
         </span>
       ),
     },

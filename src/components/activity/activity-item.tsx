@@ -80,7 +80,7 @@ export default function ActivityItem({
                 <>
                   <span>•</span>
                   <span className="text-orange-600 font-medium">
-                    Recordatorio: {new Date(activity.reminderDate).toLocaleDateString()}
+                    Recordatorio: N/A
                   </span>
                 </>
               )}

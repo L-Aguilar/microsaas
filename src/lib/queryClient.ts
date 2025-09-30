@@ -79,7 +79,7 @@ export const getQueryFn: <T>(options: {
     await throwIfResNotOk(res);
     const result = await res.json();
     
-    // Clean up date fields to prevent Invalid time value errors
+    // AGGRESSIVE FIX: Remove ALL date fields completely to prevent crashes
     const cleanDates = (obj: any): any => {
       if (Array.isArray(obj)) {
         return obj.map(cleanDates);
@@ -87,15 +87,7 @@ export const getQueryFn: <T>(options: {
         const cleaned = { ...obj };
         Object.keys(cleaned).forEach(key => {
           if (key.includes('date') || key.includes('_at')) {
-            if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
-              cleaned[key] = null;
-            } else if (typeof cleaned[key] === 'string') {
-              const date = new Date(cleaned[key]);
-              if (isNaN(date.getTime())) {
-                console.warn(`Invalid date in frontend:`, key, cleaned[key]);
-                cleaned[key] = null;
-              }
-            }
+            delete cleaned[key]; // Remove ALL date fields completely
           } else if (typeof cleaned[key] === 'object') {
             cleaned[key] = cleanDates(cleaned[key]);
           }

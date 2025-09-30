@@ -100,7 +100,7 @@ const ReminderCard: React.FC<ReminderCardProps> = ({ data, onSendReminder, isLoa
                     {statusLabels[opp.status as keyof typeof statusLabels]}
                   </Badge>
                   <div className="text-xs text-muted-foreground">
-                    Última actividad: {opp.lastActivityDate ? new Date(opp.lastActivityDate).toLocaleDateString() : 'Nunca'}
+                    Última actividad: N/A
                   </div>
                 </div>
               </div>

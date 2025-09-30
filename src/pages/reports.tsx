@@ -110,7 +110,7 @@ export default function Reports() {
           </div>
           <div className="text-right">
             <p className="text-sm text-gray-500">Última actualización</p>
-            <p className="text-sm font-medium text-gray-900">{new Date().toLocaleDateString('es-ES')}</p>
+            <p className="text-sm font-medium text-gray-900">N/A</p>
           </div>
         </div>
       </div>

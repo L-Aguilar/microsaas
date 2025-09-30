@@ -155,25 +155,14 @@ export default async function handler(req, res) {
       
       await pool.end();
       
-      // Clean up any invalid dates in the response
+      // AGGRESSIVE FIX: Remove ALL date fields completely to prevent crashes
       const cleanedData = result.rows.map(row => {
         const cleaned = { ...row };
         
-        // Check all properties for date fields and clean them
+        // Remove ALL date fields completely
         Object.keys(cleaned).forEach(key => {
           if (key.includes('date') || key.includes('_at')) {
-            if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
-              // Keep as null for explicit null dates
-              cleaned[key] = null;
-            } else if (typeof cleaned[key] === 'string') {
-              // Validate if it's a valid date string
-              const date = new Date(cleaned[key]);
-              if (isNaN(date.getTime())) {
-                // Invalid date, set to null
-                console.warn(`Invalid date found in ${entity}.${key}:`, cleaned[key]);
-                cleaned[key] = null;
-              }
-            }
+            delete cleaned[key]; // Remove the field entirely
           }
         });
         

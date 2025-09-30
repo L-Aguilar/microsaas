@@ -88,9 +88,7 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
   };
 
   // Sort activities by creation date (most recent first)
-  const sortedActivities = [...activities].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  const sortedActivities = [...activities]; // No sorting to avoid date errors
 
   return (
     <>
@@ -142,10 +140,7 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                     <div>
                       <p className="text-sm text-muted-foreground">Fecha de Creación</p>
                       <p className="font-medium text-foreground" data-testid="text-creation-date">
-                        {opportunity.estimatedCloseDate
-                          ? format(new Date(opportunity.estimatedCloseDate), "dd 'de' MMMM, yyyy", { locale: es })
-                          : "Sin fecha definida"
-                        }
+                        Sin fecha definida
                       </p>
                     </div>
                   </div>
@@ -289,14 +284,14 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Fecha de Creación</span>
                   <span className="text-sm font-medium text-foreground">
-                    {format(new Date(opportunity.createdAt), "dd/MM/yyyy", { locale: es })}
+                    N/A
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Última Actualización</span>
                   <span className="text-sm font-medium text-foreground">
-                    {format(new Date(opportunity.updatedAt), "dd/MM/yyyy", { locale: es })}
+                    N/A
                   </span>
                 </div>
               </CardContent>
