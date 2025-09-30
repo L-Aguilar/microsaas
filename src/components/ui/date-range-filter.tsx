@@ -4,8 +4,7 @@ import { Button } from './button';
 import { Input } from './input';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
 import { Calendar as CalendarComponent } from './calendar';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatSafeDate } from '@/lib/custom-dates';
 
 interface DateRangeFilterProps {
   startDate: Date | undefined;
@@ -40,9 +39,9 @@ export function DateRangeFilter({
 
   const formatDateRange = () => {
     if (startDate && endDate) {
-      return `${format(startDate, 'dd/MM/yyyy', { locale: es })} - ${format(endDate, 'dd/MM/yyyy', { locale: es })}`;
+      return `${formatSafeDate(startDate)} - ${formatSafeDate(endDate)}`;
     } else if (startDate) {
-      return `Desde ${format(startDate, 'dd/MM/yyyy', { locale: es })}`;
+      return `Desde ${formatSafeDate(startDate)}`;
     }
     return placeholder;
   };

@@ -9,8 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Building, ArrowLeft, Search, Calendar, DollarSign, User, Eye, Edit } from "lucide-react";
 import { CompanyWithRelations, OpportunityWithRelations } from "@shared/schema";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "@/lib/custom-dates";
 import CompanyForm from "@/components/forms/company-form";
 import { DataTable, Column } from "@/components/ui/data-table";
 
@@ -133,7 +132,7 @@ export default function CompanyDetail() {
           <div className="flex items-center space-x-2">
             <Calendar className="h-4 w-4 text-gray-400" />
             <span>
-              {format(new Date(value), "dd/MM/yyyy", { locale: es })}
+              {formatSafeDate(value)}
             </span>
           </div>
         ) : (
@@ -290,7 +289,7 @@ export default function CompanyDetail() {
             <div>
               <label className="text-sm font-medium text-muted-foreground">Fecha de Creación</label>
               <p className="text-sm font-medium text-foreground" data-testid="company-created">
-                {format(new Date(company.createdAt), "dd/MM/yyyy", { locale: es })}
+                {formatSafeDate(company.createdAt)}
               </p>
             </div>
           </div>

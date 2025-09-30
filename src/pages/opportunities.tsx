@@ -229,7 +229,7 @@ export default function Opportunities() {
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-gray-400" />
           <span className="text-sm text-gray-600">
-            {value ? format(new Date(value), 'dd/MM/yyyy', { locale: es }) : '-'}
+            {value ? formatSafeDate(value) : '-'}
           </span>
         </div>
       ),
@@ -242,7 +242,7 @@ export default function Opportunities() {
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {format(new Date(value), 'dd/MM/yyyy', { locale: es })}
+          {formatSafeDate(value)}
         </span>
       ),
     },

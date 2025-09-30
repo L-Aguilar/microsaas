@@ -16,8 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import UserForm from "@/components/forms/user-form";
 import { Link } from "wouter";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { formatSafeDate } from "@/lib/custom-dates";
 
 export default function BusinessAccountDetailPage() {
   const { id } = useParams();
