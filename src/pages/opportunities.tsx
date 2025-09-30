@@ -77,7 +77,7 @@ export default function Opportunities() {
   });
 
   // Filter opportunities
-  const filteredOpportunities = opportunities.filter(opportunity => {
+  const filteredOpportunities = (opportunities || []).filter(opportunity => {
     const matchesStatus = statusFilter === "all" || opportunity.status === statusFilter;
     const matchesSeller = sellerFilter === "all" || opportunity.sellerId === sellerFilter;
     const matchesCompany = companyFilter === "all" || opportunity.companyId === companyFilter;
@@ -99,11 +99,14 @@ export default function Opportunities() {
 
   // Sort by last activity (most recent first)
   const sortedOpportunities = [...filteredOpportunities].sort((a, b) => {
-    const aLastActivity = a.activities.length > 0 
-      ? Math.max(...a.activities.map(activity => new Date(activity.createdAt).getTime()))
+    const aActivities = a.activities || [];
+    const bActivities = b.activities || [];
+    
+    const aLastActivity = aActivities.length > 0 
+      ? Math.max(...aActivities.map(activity => new Date(activity.createdAt).getTime()))
       : new Date(a.createdAt).getTime();
-    const bLastActivity = b.activities.length > 0
-      ? Math.max(...b.activities.map(activity => new Date(activity.createdAt).getTime()))
+    const bLastActivity = bActivities.length > 0
+      ? Math.max(...bActivities.map(activity => new Date(activity.createdAt).getTime()))
       : new Date(b.createdAt).getTime();
     
     return bLastActivity - aLastActivity;
