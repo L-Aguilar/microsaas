@@ -48,20 +48,29 @@ export async function apiRequest(
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
+  user?: any;
 }) => QueryFunction<T> =
-  ({ on401: unauthorizedBehavior }) =>
+  ({ on401: unauthorizedBehavior, user }) =>
   async ({ queryKey }) => {
     let path = queryKey.join("/") as string;
     
-    // Redirect API calls to REAL CRM DATA from Supabase
+    // Build authorization parameters from user data
+    const authParams = new URLSearchParams();
+    if (user) {
+      authParams.set('current_user_id', user.id || '');
+      authParams.set('current_user_role', user.role || '');
+      authParams.set('current_business_account_id', user.business_account_id || user.businessAccountId || '');
+    }
+    
+    // Use the individual API endpoints with authorization
     if (path === '/api/companies') {
-      path = '/api/test-supabase?entity=companies';
+      path = `/api/companies?${authParams.toString()}`;
     } else if (path === '/api/opportunities') {
-      path = '/api/test-supabase?entity=opportunities';
+      path = `/api/opportunities?${authParams.toString()}`;
     } else if (path === '/api/users') {
-      path = '/api/test-supabase?entity=users';
+      path = `/api/users?${authParams.toString()}`;
     } else if (path === '/api/activities') {
-      path = '/api/test-supabase?entity=activities';
+      path = `/api/activities?${authParams.toString()}`;
     } else if (path === '/api/reports/stats') {
       path = '/api/reports';
     }
@@ -107,10 +116,11 @@ export const getQueryFn: <T>(options: {
     return cleanDates(result);
   };
 
-export const queryClient = new QueryClient({
+// Function to create queryClient with user context
+export const createQueryClient = (user?: any) => new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn({ on401: "throw" }),
+      queryFn: getQueryFn({ on401: "throw", user }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: 0, // NO CACHE
@@ -123,3 +133,6 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// Default queryClient for backward compatibility
+export const queryClient = createQueryClient();

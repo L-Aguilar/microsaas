@@ -17,14 +17,40 @@ export default async function handler(req, res) {
 
     switch (req.method) {
       case 'GET':
-        const opportunities = await pool.query(`
-          SELECT o.*, c.name as company_name, u.name as seller_name
-          FROM opportunities o
-          LEFT JOIN companies c ON o.company_id = c.id
-          LEFT JOIN users u ON o.seller_id = u.id
-          WHERE o.business_account_id IS NOT NULL
-          ORDER BY o.created_at DESC
-        `);
+        // Get current user info from query params for authorization
+        const { current_user_role, current_business_account_id } = req.query;
+        
+        let opportunitiesQuery;
+        let queryParams = [];
+        
+        if (current_user_role === 'SUPER_ADMIN') {
+          // SUPER_ADMIN can see all opportunities
+          opportunitiesQuery = `
+            SELECT o.*, c.name as company_name, u.name as seller_name
+            FROM opportunities o
+            LEFT JOIN companies c ON o.company_id = c.id
+            LEFT JOIN users u ON o.seller_id = u.id
+            WHERE o.business_account_id IS NOT NULL
+            ORDER BY o.created_at DESC
+          `;
+        } else if (current_business_account_id) {
+          // BUSINESS_PLAN and USER can only see opportunities from their business account
+          opportunitiesQuery = `
+            SELECT o.*, c.name as company_name, u.name as seller_name
+            FROM opportunities o
+            LEFT JOIN companies c ON o.company_id = c.id
+            LEFT JOIN users u ON o.seller_id = u.id
+            WHERE o.business_account_id = $1
+            ORDER BY o.created_at DESC
+          `;
+          queryParams = [current_business_account_id];
+        } else {
+          // No access if no business account
+          await pool.end();
+          return res.status(403).json({ message: 'Access denied' });
+        }
+        
+        const opportunities = await pool.query(opportunitiesQuery, queryParams);
         
         await pool.end();
         return res.status(200).json({

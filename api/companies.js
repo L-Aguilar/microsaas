@@ -17,14 +17,40 @@ export default async function handler(req, res) {
 
     switch (req.method) {
       case 'GET':
-        const companies = await pool.query(`
-          SELECT c.*, COUNT(o.id) as opportunities_count
-          FROM companies c
-          LEFT JOIN opportunities o ON c.id = o.company_id
-          WHERE c.business_account_id IS NOT NULL
-          GROUP BY c.id
-          ORDER BY c.created_at DESC
-        `);
+        // Get current user info from query params for authorization
+        const { current_user_role, current_business_account_id } = req.query;
+        
+        let companiesQuery;
+        let queryParams = [];
+        
+        if (current_user_role === 'SUPER_ADMIN') {
+          // SUPER_ADMIN can see all companies
+          companiesQuery = `
+            SELECT c.*, COUNT(o.id) as opportunities_count
+            FROM companies c
+            LEFT JOIN opportunities o ON c.id = o.company_id
+            WHERE c.business_account_id IS NOT NULL
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+          `;
+        } else if (current_business_account_id) {
+          // BUSINESS_PLAN and USER can only see companies from their business account
+          companiesQuery = `
+            SELECT c.*, COUNT(o.id) as opportunities_count
+            FROM companies c
+            LEFT JOIN opportunities o ON c.id = o.company_id
+            WHERE c.business_account_id = $1
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+          `;
+          queryParams = [current_business_account_id];
+        } else {
+          // No access if no business account
+          await pool.end();
+          return res.status(403).json({ message: 'Access denied' });
+        }
+        
+        const companies = await pool.query(companiesQuery, queryParams);
         
         await pool.end();
         return res.status(200).json({

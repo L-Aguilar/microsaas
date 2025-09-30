@@ -17,19 +17,40 @@ export default async function handler(req, res) {
 
     switch (req.method) {
       case 'GET':
-        const { opportunity_id } = req.query;
+        // Get current user info from query params for authorization
+        const { opportunity_id, current_user_role, current_business_account_id } = req.query;
         
-        let query = `
-          SELECT a.*, u.name as author_name, o.title as opportunity_title
-          FROM activities a
-          LEFT JOIN users u ON a.author_id = u.id
-          LEFT JOIN opportunities o ON a.opportunity_id = o.id
-          WHERE a.business_account_id IS NOT NULL
-        `;
+        let query;
         let params = [];
+        
+        if (current_user_role === 'SUPER_ADMIN') {
+          // SUPER_ADMIN can see all activities
+          query = `
+            SELECT a.*, u.name as author_name, o.title as opportunity_title
+            FROM activities a
+            LEFT JOIN users u ON a.author_id = u.id
+            LEFT JOIN opportunities o ON a.opportunity_id = o.id
+            WHERE a.business_account_id IS NOT NULL
+          `;
+        } else if (current_business_account_id) {
+          // BUSINESS_PLAN and USER can only see activities from their business account
+          query = `
+            SELECT a.*, u.name as author_name, o.title as opportunity_title
+            FROM activities a
+            LEFT JOIN users u ON a.author_id = u.id
+            LEFT JOIN opportunities o ON a.opportunity_id = o.id
+            WHERE a.business_account_id = $1
+          `;
+          params.push(current_business_account_id);
+        } else {
+          // No access if no business account
+          await pool.end();
+          return res.status(403).json({ message: 'Access denied' });
+        }
 
         if (opportunity_id) {
-          query += ' AND a.opportunity_id = $1';
+          const paramIndex = params.length + 1;
+          query += ` AND a.opportunity_id = $${paramIndex}`;
           params.push(opportunity_id);
         }
 

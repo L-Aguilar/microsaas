@@ -17,13 +17,46 @@ export default async function handler(req, res) {
 
     switch (req.method) {
       case 'GET':
-        const users = await pool.query(`
-          SELECT u.id, u.name, u.email, u.role, u.created_at, u.updated_at,
-                 ba.name as business_account_name
-          FROM users u
-          LEFT JOIN business_accounts ba ON u.business_account_id = ba.id
-          ORDER BY u.created_at DESC
-        `);
+        // Get current user info from query params for authorization
+        const { current_user_id, current_user_role, current_business_account_id } = req.query;
+        
+        let usersQuery;
+        let queryParams = [];
+        
+        if (current_user_role === 'SUPER_ADMIN') {
+          // SUPER_ADMIN can see all users
+          usersQuery = `
+            SELECT u.id, u.name, u.email, u.role, u.created_at, u.updated_at,
+                   ba.name as business_account_name
+            FROM users u
+            LEFT JOIN business_accounts ba ON u.business_account_id = ba.id
+            ORDER BY u.created_at DESC
+          `;
+        } else if (current_user_role === 'BUSINESS_PLAN' && current_business_account_id) {
+          // BUSINESS_PLAN can only see users from their business account
+          usersQuery = `
+            SELECT u.id, u.name, u.email, u.role, u.created_at, u.updated_at,
+                   ba.name as business_account_name
+            FROM users u
+            LEFT JOIN business_accounts ba ON u.business_account_id = ba.id
+            WHERE u.business_account_id = $1
+            ORDER BY u.created_at DESC
+          `;
+          queryParams = [current_business_account_id];
+        } else {
+          // Regular USER can only see themselves
+          usersQuery = `
+            SELECT u.id, u.name, u.email, u.role, u.created_at, u.updated_at,
+                   ba.name as business_account_name
+            FROM users u
+            LEFT JOIN business_accounts ba ON u.business_account_id = ba.id
+            WHERE u.id = $1
+            ORDER BY u.created_at DESC
+          `;
+          queryParams = [current_user_id];
+        }
+        
+        const users = await pool.query(usersQuery, queryParams);
         
         await pool.end();
         return res.status(200).json({
