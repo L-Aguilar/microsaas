@@ -12,12 +12,14 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
     e.dataTransfer.setData("text/plain", opportunity.id);
   };
 
-  const getSellerInitials = (name: string) => {
+  const getSellerInitials = (name: string | undefined) => {
+    if (!name) return 'U';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
-  const getSellerColorClass = (sellerId: string) => {
+  const getSellerColorClass = (sellerId: string | undefined) => {
     const colors = ['bg-blue-100 text-blue-600', 'bg-purple-100 text-purple-600', 'bg-green-100 text-green-600'];
+    if (!sellerId) return colors[0]; // Default color
     const index = sellerId.charCodeAt(0) % colors.length;
     return colors[index];
   };
@@ -54,7 +56,7 @@ export default function OpportunityCard({ opportunity }: OpportunityCardProps) {
         </div>
         
         {/* Avatar */}
-        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-medium ${getSellerColorClass(opportunity.sellerId)}`}>
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-medium ${getSellerColorClass(opportunity.seller_id)}`}>
           {getSellerInitials(opportunity.seller_name)}
         </div>
       </div>

@@ -74,7 +74,7 @@ export default function BusinessAccountDetailPage() {
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
             <span className="text-xs font-semibold text-foreground">
-              {user.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+              {user.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
             </span>
           </div>
           <span className="font-medium">{value}</span>
