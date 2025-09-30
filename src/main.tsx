@@ -3,23 +3,27 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
-// NUCLEAR FIX: Clear ALL localStorage and sessionStorage on EVERY load
+// SELECTIVE FIX: Clear only potentially problematic date-related data
 try {
-  console.log('🧹 NUCLEAR CLEANUP: Clearing ALL storage...');
+  console.log('🧹 SELECTIVE CLEANUP: Clearing date-related storage...');
   
-  // Clear EVERYTHING
-  localStorage.clear();
-  sessionStorage.clear();
-  
-  // Also clear any indexed DB or other storage
+  // Only clear react-query cache that might contain invalid dates
   if ('indexedDB' in window) {
     indexedDB.deleteDatabase('react-query-cache');
     indexedDB.deleteDatabase('keyval-store');
   }
   
-  console.log('✅ NUCLEAR cleanup completed - ALL storage cleared');
+  // Clear only specific localStorage keys that might contain dates, NOT auth data
+  const keysToCheck = ['opportunities', 'companies', 'activities', 'reports'];
+  keysToCheck.forEach(key => {
+    if (localStorage.getItem(key)) {
+      localStorage.removeItem(key);
+    }
+  });
+  
+  console.log('✅ SELECTIVE cleanup completed - Auth data preserved');
 } catch (error) {
-  console.error('❌ Error during nuclear cleanup:', error);
+  console.error('❌ Error during selective cleanup:', error);
 }
 
 // NUCLEAR FIX: Intercept ALL JSON parsing to remove dates
