@@ -87,8 +87,10 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
     ON_HOLD: "En Espera",
   };
 
-  // Sort activities by creation date (most recent first)
-  const sortedActivities = [...activities]; // No sorting to avoid date errors
+  // Sort activities by creation date (most recent first) 
+  const sortedActivities = [...activities].sort(
+    (a, b) => (b.id || '').localeCompare(a.id || '') // Sort by ID instead of date
+  );
 
   return (
     <>
@@ -140,7 +142,7 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                     <div>
                       <p className="text-sm text-muted-foreground">Fecha de Creación</p>
                       <p className="font-medium text-foreground" data-testid="text-creation-date">
-                        Sin fecha definida
+                        {opportunity.estimated_close_date || 'Sin fecha definida'}
                       </p>
                     </div>
                   </div>
@@ -284,14 +286,14 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Fecha de Creación</span>
                   <span className="text-sm font-medium text-foreground">
-                    N/A
+                    {opportunity.created_at || 'N/A'}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Última Actualización</span>
                   <span className="text-sm font-medium text-foreground">
-                    N/A
+                    {opportunity.updated_at || 'N/A'}
                   </span>
                 </div>
               </CardContent>

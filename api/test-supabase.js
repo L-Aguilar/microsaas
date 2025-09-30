@@ -155,28 +155,29 @@ export default async function handler(req, res) {
       
       await pool.end();
       
-      // SAFE DATE FIX: Convert all dates to Unix timestamps (numbers)
+      // RADICAL FIX: Format ALL dates on the server - frontend NEVER touches dates
       const cleanedData = result.rows.map(row => {
         const cleaned = { ...row };
         
-        // Convert date fields to safe Unix timestamps
+        // Convert date fields to pre-formatted strings
         Object.keys(cleaned).forEach(key => {
           if (key.includes('date') || key.includes('_at')) {
             if (cleaned[key] === null || cleaned[key] === undefined || cleaned[key] === '') {
-              cleaned[key] = null;
+              cleaned[key] = 'N/A';
             } else {
               try {
                 const date = new Date(cleaned[key]);
                 if (isNaN(date.getTime())) {
-                  // Invalid date, set to current time as fallback
-                  cleaned[key] = Math.floor(Date.now() / 1000);
+                  cleaned[key] = 'N/A';
                 } else {
-                  // Convert to Unix timestamp (seconds since epoch)
-                  cleaned[key] = Math.floor(date.getTime() / 1000);
+                  // Format date on server side to DD/MM/YYYY
+                  const day = String(date.getDate()).padStart(2, '0');
+                  const month = String(date.getMonth() + 1).padStart(2, '0');
+                  const year = date.getFullYear();
+                  cleaned[key] = `${day}/${month}/${year}`;
                 }
               } catch (error) {
-                // If conversion fails, use current time
-                cleaned[key] = Math.floor(Date.now() / 1000);
+                cleaned[key] = 'N/A';
               }
             }
           }

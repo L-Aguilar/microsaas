@@ -158,7 +158,7 @@ export default function UsersPage() {
       width: "w-1/6",
       render: (value) => (
         <span className="text-sm text-gray-600">
-          {safeFormatTimestamp(value)}
+          {value || 'N/A'}
         </span>
       ),
     },
