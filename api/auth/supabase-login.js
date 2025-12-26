@@ -55,9 +55,11 @@ export default async function handler(req, res) {
     const user = result.rows[0];
     console.log('User role:', user.role);
 
-    // For now, we'll compare passwords directly (should use bcrypt in production)
-    // Check if it's the admin with the expected password
-    if (email === 'admin@bizflowcrm.com' && password === 'SecureAdmin2024!@#BizFlow') {
+    // Use bcrypt to compare passwords securely
+    const bcrypt = await import('bcrypt');
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    
+    if (isValidPassword) {
       await pool.end();
       
       // Return user data (without password)
@@ -70,10 +72,6 @@ export default async function handler(req, res) {
         message: 'Login successful'
       });
     }
-
-    // If we have bcrypt, we can use this:
-    // const bcrypt = await import('bcrypt');
-    // const isValidPassword = await bcrypt.compare(password, user.password);
     
     await pool.end();
     return res.status(401).json({ message: 'Invalid email or password' });

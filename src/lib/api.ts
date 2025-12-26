@@ -13,11 +13,4 @@ export function buildApiUrl(path: string): string {
 export const isDevelopment = import.meta.env.DEV;
 export const isProduction = import.meta.env.PROD;
 
-// Log API configuration in development
-if (isDevelopment) {
-  console.log('🔌 API Configuration:', {
-    API_BASE_URL,
-    isDevelopment,
-    isProduction
-  });
-}
+// Log API configuration in development - removed for production readiness

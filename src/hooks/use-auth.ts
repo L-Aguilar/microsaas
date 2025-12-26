@@ -63,13 +63,10 @@ export function useAuth() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      console.log("🔄 Iniciando logout...");
       const response = await apiRequest("POST", "/api/auth/logout");
-      console.log("✅ Logout exitoso en backend");
       return response;
     },
     onSuccess: () => {
-      console.log("🧹 Limpiando estado local...");
       setUser(null);
       setStoredUser(null);
       queryClient.clear();
@@ -80,7 +77,6 @@ export function useAuth() {
         description: "Has cerrado sesión correctamente",
       });
       // Automatic redirect to login after successful logout
-      console.log("🚀 Redirigiendo a login...");
       setTimeout(() => {
         setLocation("/login");
       }, 100);

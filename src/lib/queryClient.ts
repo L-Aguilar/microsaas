@@ -116,31 +116,21 @@ export const getQueryFn: <T>(options: {
       return obj;
     };
     
-    // DEBUG: Log the result structure
-    console.log('API Response for path:', path, 'Result:', result);
-    
     // Transform data to expected format
     if (result.data && Array.isArray(result.data)) {
-      console.log('Returning result.data array');
       return cleanDates(result.data); // Return cleaned data array for entity queries
     } else if (Array.isArray(result)) {
-      console.log('Returning direct array');
       return cleanDates(result); // Direct array response (like debug-frontend)
     } else if (result.success && result.companies && Array.isArray(result.companies)) {
-      console.log('Returning result.companies array');
       return cleanDates(result.companies); // New API structure for companies
     } else if (result.success && result.opportunities && Array.isArray(result.opportunities)) {
-      console.log('Returning result.opportunities array');
       return cleanDates(result.opportunities); // New API structure for opportunities
     } else if (result.success && result.users && Array.isArray(result.users)) {
-      console.log('Returning result.users array');
       return cleanDates(result.users); // New API structure for users
     } else if (result.success && result.activities && Array.isArray(result.activities)) {
-      console.log('Returning result.activities array');
       return cleanDates(result.activities); // New API structure for activities
     }
     
-    console.log('Returning full result object');
     return cleanDates(result);
   };
 
@@ -151,7 +141,7 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: 0, // NO CACHE
-      cacheTime: 0, // NO CACHE
+      gcTime: 0, // NO CACHE
       retry: false,
       enabled: true,
     },

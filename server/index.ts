@@ -19,7 +19,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 login attempts per windowMs
+  max: 50, // limit each IP to 50 login attempts per windowMs (increased for testing)
   message: 'Too many authentication attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -61,6 +61,13 @@ app.use(helmet({
 // Configure CORS with strict origin validation
 app.use(cors({
   origin: (origin, callback) => {
+    // In development, allow localhost
+    if (process.env.NODE_ENV === 'development') {
+      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+    
     const allowedOrigins = process.env.CORS_ORIGIN ? 
       process.env.CORS_ORIGIN.split(',').map(url => url.trim()) : 
       ['https://yourdomain.com'];

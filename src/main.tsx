@@ -5,8 +5,6 @@ import "./index.css";
 
 // SELECTIVE FIX: Clear only potentially problematic date-related data
 try {
-  console.log('🧹 SELECTIVE CLEANUP: Clearing date-related storage...');
-  
   // Only clear react-query cache that might contain invalid dates
   if ('indexedDB' in window) {
     indexedDB.deleteDatabase('react-query-cache');
@@ -20,8 +18,6 @@ try {
       localStorage.removeItem(key);
     }
   });
-  
-  console.log('✅ SELECTIVE cleanup completed - Auth data preserved');
 } catch (error) {
   console.error('❌ Error during selective cleanup:', error);
 }
@@ -60,7 +56,6 @@ JSON.parse = function(text, reviver) {
 window.addEventListener('error', (event) => {
   if (event.error?.message?.includes('Invalid time value')) {
     console.error('🚨 CRITICAL: Invalid time value error detected!', event.error);
-    console.log('🔧 Reloading page immediately...');
     
     // Clear everything and reload immediately
     localStorage.clear();

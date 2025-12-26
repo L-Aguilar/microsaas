@@ -19,8 +19,6 @@ export default function PasswordRecovery() {
     setError('');
 
     try {
-      console.log('🔍 Sending password recovery request for:', email);
-      
       const response = await fetch(`${API_BASE_URL}/api/auth/recover-password`, {
         method: 'POST',
         headers: {
@@ -28,14 +26,10 @@ export default function PasswordRecovery() {
         },
         body: JSON.stringify({ email }),
       });
-
-      console.log('📡 Response status:', response.status);
       
       const data = await response.json();
-      console.log('📦 Response data:', data);
 
       if (response.ok) {
-        console.log('✅ Password recovery successful');
         setIsSuccess(true);
       } else {
         console.error('❌ Password recovery failed:', data.message);

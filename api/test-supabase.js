@@ -257,8 +257,29 @@ export default async function handler(req, res) {
       if (authError && (authError.message === 'Invalid login credentials' || authError.message === 'Email not confirmed')) {
         console.log('Auth error:', authError.message);
         
-        // For development, we'll bypass Supabase Auth and authenticate directly with our database
-        // This is only for the specific user luis@sheilim.com with the correct password
+        // For Super Admin and development, we'll bypass Supabase Auth and authenticate directly with our database
+        // Use bcrypt for secure password verification
+        try {
+          const bcrypt = await import('bcrypt');
+          const isValidPassword = await bcrypt.compare(password, user.password);
+          
+          if (isValidPassword) {
+            console.log('Bypassing Supabase Auth - Valid database user with bcrypt verification');
+            
+            await pool.end();
+            const { password: _, ...userWithoutPassword } = user;
+            
+            return res.status(200).json({
+              user: userWithoutPassword,
+              message: 'Login successful - database authentication',
+              authMethod: 'database-bcrypt'
+            });
+          }
+        } catch (bcryptError) {
+          console.error('Bcrypt error:', bcryptError);
+        }
+        
+        // Legacy check for specific development user
         if (email === 'luis@sheilim.com' && password === 'ApT9xqq05qGC') {
           console.log('Bypassing Supabase Auth for development user');
           
