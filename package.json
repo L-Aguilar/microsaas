@@ -103,6 +103,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "^4.55.1",
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.1.3",
     "@types/bcrypt": "^6.0.0",
