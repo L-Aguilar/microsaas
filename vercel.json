@@ -1,6 +1,6 @@
 {
-  "buildCommand": "npm install --force && npm run build",
   "installCommand": "npm install --force",
+  "buildCommand": "npx vite build",
   "framework": "vite",
   "rewrites": [
     {
