@@ -2,7 +2,7 @@ export default function StaticDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">Dashboard - BizFlowCRM</h1>
+        <h1 className="text-3xl font-bold text-foreground">Dashboard - Controly</h1>
         <div className="text-sm text-muted-foreground">
           Datos en tiempo real
         </div>

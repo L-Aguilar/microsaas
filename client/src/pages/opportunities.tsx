@@ -11,6 +11,7 @@ import { OpportunityWithRelations, CompanyWithRelations, User as UserType } from
 import OpportunityForm from "@/components/forms/opportunity-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useModulePermissions } from "@/hooks/use-module-permissions";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { DataTable, Column } from "@/components/ui/data-table";
@@ -31,6 +32,7 @@ export default function Opportunities() {
   const [editingOpportunity, setEditingOpportunity] = useState<OpportunityWithRelations | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { canCreate, canEdit, canDelete } = useModulePermissions('CRM');
 
   const { data: opportunities = [], isLoading } = useQuery<OpportunityWithRelations[]>({
     queryKey: ["/api/opportunities"],
@@ -129,22 +131,18 @@ export default function Opportunities() {
 
   const statusColors = {
     NEW: "bg-blue-100 text-blue-800",
-    QUALIFYING: "bg-yellow-100 text-yellow-800",
-    PROPOSAL: "bg-purple-100 text-purple-800",
+    IN_PROGRESS: "bg-purple-100 text-purple-800",
     NEGOTIATION: "bg-orange-100 text-orange-800",
     WON: "bg-green-100 text-green-800",
     LOST: "bg-red-100 text-red-800",
-    ON_HOLD: "bg-gray-100 text-gray-800",
   };
 
   const statusLabels = {
     NEW: "Nueva",
-    QUALIFYING: "Calificando",
-    PROPOSAL: "Propuesta",
+    IN_PROGRESS: "En Proceso",
     NEGOTIATION: "Negociación",
     WON: "Ganada",
     LOST: "Perdida",
-    ON_HOLD: "En Espera",
   };
 
   const typeLabels = {
@@ -271,20 +269,26 @@ export default function Opportunities() {
               handleEdit(opportunity);
             }}
             className="h-8 w-8 p-0"
+            disabled={!canEdit}
+            title={!canEdit ? "No tienes permisos para editar oportunidades" : ""}
           >
             <Edit className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete(opportunity.id);
-            }}
-            className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(opportunity.id);
+              }}
+              className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+              disabled={!canDelete}
+              title={!canDelete ? "No tienes permisos para eliminar oportunidades" : ""}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ),
     },
@@ -312,7 +316,11 @@ export default function Opportunities() {
             Gestiona las oportunidades de venta y seguimiento de clientes.
           </p>
         </div>
-                    <Button onClick={() => setShowCreateModal(true)}>
+        <Button 
+          onClick={() => setShowCreateModal(true)}
+          disabled={!canCreate}
+          title={!canCreate ? "No tienes permisos para crear oportunidades" : ""}
+        >
           <Plus className="mr-2 h-4 w-4" />
           Nueva Oportunidad
         </Button>

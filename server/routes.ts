@@ -4,12 +4,14 @@ import { storage } from "./storage";
 import session from "express-session";
 import ConnectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
-import { insertUserSchema, updateUserSchema, insertCompanySchema, updateCompanySchema, insertOpportunitySchema, updateOpportunitySchema, insertActivitySchema, insertModuleSchema, insertBusinessAccountSchema, insertBusinessAccountModuleSchema } from "@shared/schema";
+import { insertUserSchema, updateUserSchema, insertCompanySchema, updateCompanySchema, insertOpportunitySchema, updateOpportunitySchema, insertActivitySchema, insertModuleSchema, insertBusinessAccountSchema, insertBusinessAccountModuleSchema, insertPlanSchema, insertProductSchema, insertPlanModuleSchema } from "@shared/schema";
 import { generateSecurePassword, generateAlphanumericPassword, hashPassword, verifyPassword } from "./utils/password";
 import { sendWelcomeEmail } from "./utils/email";
 import { sendEmail, sendWelcomeEmail as sendBrevoWelcomeEmail } from "./services/emailService";
 import { ReminderService } from "./services/reminderService";
 import { secureLog } from "./utils/secureLogger";
+import { checkPlanLimits, attachModulePermissions, updateUsageAfterAction } from "./middleware/planLimitsMiddleware";
+import { planService } from "./services/planService";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
@@ -169,14 +171,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           to: user.email,
           toName: user.name,
           from: process.env.FROM_EMAIL || 'noreply@sheilim.com',
-          fromName: process.env.FROM_NAME || 'ShimliAdmin',
-          subject: "Recuperación de Contraseña - ShimliAdmin",
+          fromName: process.env.FROM_NAME || 'Controly',
+          subject: "Recuperación de Contraseña - Controly",
           htmlContent: `
             <!DOCTYPE html>
             <html>
             <head>
               <meta charset="utf-8">
-              <title>Recuperación de Contraseña - ShimliAdmin</title>
+              <title>Recuperación de Contraseña - Controly</title>
               <style>
                 body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
                 .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -193,11 +195,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               <div class="container">
                 <div class="header">
                   <h1>🔐 Recuperación de Contraseña</h1>
-                  <p>ShimliAdmin - Sistema de Gestión</p>
+                  <p>Controly - Sistema de Gestión</p>
                 </div>
                 <div class="content">
                   <h2>Hola ${user.name},</h2>
-                  <p>Hemos recibido una solicitud para recuperar tu contraseña en ShimliAdmin.</p>
+                  <p>Hemos recibido una solicitud para recuperar tu contraseña en Controly.</p>
                   <p>Tu nueva contraseña temporal es:</p>
                   
                   <div class="password-box">
@@ -219,8 +221,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   <p>Si no solicitaste este cambio de contraseña, por favor contacta al administrador del sistema.</p>
                   
                   <div class="footer">
-                    <p>Este email fue enviado automáticamente por ShimliAdmin</p>
-                    <p>© ${new Date().getFullYear()} ShimliAdmin - Todos los derechos reservados</p>
+                    <p>Este email fue enviado automáticamente por Controly</p>
+                    <p>© ${new Date().getFullYear()} Controly - Todos los derechos reservados</p>
                   </div>
                 </div>
               </div>
@@ -228,11 +230,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             </html>
           `,
           textContent: `
-            Recuperación de Contraseña - ShimliAdmin
+            Recuperación de Contraseña - Controly
             
             Hola ${user.name},
             
-            Hemos recibido una solicitud para recuperar tu contraseña en ShimliAdmin.
+            Hemos recibido una solicitud para recuperar tu contraseña en Controly.
             
             Tu nueva contraseña temporal es: ${newPassword}
             
@@ -245,8 +247,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             
             Si no solicitaste este cambio de contraseña, por favor contacta al administrador del sistema.
             
-            Este email fue enviado automáticamente por ShimliAdmin
-            © ${new Date().getFullYear()} ShimliAdmin - Todos los derechos reservados
+            Este email fue enviado automáticamente por Controly
+            © ${new Date().getFullYear()} Controly - Todos los derechos reservados
           `
         });
 
@@ -311,6 +313,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     // Add businessAccountId to request for filtering
     req.businessAccountId = user.businessAccountId;
+    next();
+  };
+
+  // Middleware for SUPER_ADMIN only access
+  const requireSuperAdmin = (req: any, res: any, next: any) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    if (user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ message: "Super admin access required" });
+    }
     next();
   };
 
@@ -531,7 +545,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), async (req: any, res) => {
+  app.post("/api/users", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
       
@@ -580,7 +594,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), async (req: any, res) => {
+  app.delete("/api/users/:id", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
     try {
       const user = await storage.getUser(req.params.id);
       if (!user) {
@@ -663,8 +677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update password in database
       const updatedUser = await storage.updateUser(req.params.id, {
-        password: hashedNewPassword,
-        updated_at: new Date()
+        password: hashedNewPassword
       });
 
       if (!updatedUser) {
@@ -734,8 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedUser = await storage.updateUser(req.params.id, {
         name,
         email,
-        phone: cleanPhone || null,
-        updated_at: new Date()
+        phone: cleanPhone || null
       });
 
       if (!updatedUser) {
@@ -797,7 +809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/companies", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
+  app.post("/api/companies", requireBusinessAccount, requireModule('COMPANIES'), checkPlanLimits('COMPANIES', 'create'), async (req: any, res) => {
     try {
       const companyData = insertCompanySchema.parse(req.body);
       
@@ -836,7 +848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/companies/:id", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
+  app.delete("/api/companies/:id", requireBusinessAccount, requireModule('COMPANIES'), checkPlanLimits('COMPANIES', 'delete'), updateUsageAfterAction('COMPANIES'), async (req: any, res) => {
     try {
       // First check if company exists and user has access
       const existingCompany = await storage.getCompany(req.params.id);
@@ -1320,6 +1332,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get user/seller metrics and performance data
+  app.get("/api/users/:id/metrics", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+    try {
+      const { id: userId } = req.params;
+      
+      // Verify user exists and belongs to the business account
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+      
+      // Security check: non-SUPER_ADMIN can only access users from their business account
+      if (req.user.role !== 'SUPER_ADMIN' && user.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Acceso denegado" });
+      }
+      
+      // Get all opportunities for this seller
+      const allOpportunities = await storage.getOpportunities(req.businessAccountId);
+      const userOpportunities = allOpportunities.filter(opp => opp.sellerId === userId);
+      
+      // Get all activities for opportunities of this seller
+      const allActivities = await storage.getActivities(req.businessAccountId);
+      const userActivities = allActivities.filter(activity => 
+        userOpportunities.some(opp => opp.id === activity.opportunityId)
+      );
+      
+      // Calculate metrics
+      const totalOpportunities = userOpportunities.length;
+      const wonOpportunities = userOpportunities.filter(opp => opp.status === 'WON').length;
+      const lostOpportunities = userOpportunities.filter(opp => opp.status === 'LOST').length;
+      const inProgressOpportunities = userOpportunities.filter(opp => 
+        ['NEW', 'IN_PROGRESS', 'NEGOTIATION'].includes(opp.status)
+      ).length;
+      
+      const conversionRate = totalOpportunities > 0 ? (wonOpportunities / totalOpportunities) * 100 : 0;
+      
+      // Activities this week
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const activitiesThisWeek = userActivities.filter(activity => {
+        const activityDate = new Date(activity.activityDate);
+        return activityDate >= weekAgo;
+      }).length;
+      
+      // Opportunities by status
+      const opportunitiesByStatus = userOpportunities.reduce((acc, opp) => {
+        acc[opp.status] = (acc[opp.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      
+      // Recent opportunities (last 10)
+      const recentOpportunities = userOpportunities
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10)
+        .map(opp => ({
+          id: opp.id,
+          title: opp.title,
+          status: opp.status,
+          companyName: opp.company.name,
+          createdAt: opp.createdAt,
+          estimatedCloseDate: opp.estimatedCloseDate,
+        }));
+      
+      // Recent activities (last 10)
+      const recentActivities = userActivities
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 10)
+        .map(activity => ({
+          id: activity.id,
+          type: activity.type,
+          details: activity.details,
+          activityDate: activity.activityDate,
+          opportunityTitle: userOpportunities.find(opp => opp.id === activity.opportunityId)?.title || 'N/A',
+          createdAt: activity.createdAt,
+        }));
+      
+      res.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+        metrics: {
+          totalOpportunities,
+          wonOpportunities,
+          lostOpportunities,
+          inProgressOpportunities,
+          conversionRate: Math.round(conversionRate * 100) / 100,
+          activitiesThisWeek,
+          totalActivities: userActivities.length,
+        },
+        opportunitiesByStatus,
+        recentOpportunities,
+        recentActivities,
+      });
+    } catch (error) {
+      console.error("Error fetching user metrics:", error);
+      res.status(500).json({ message: "Error al obtener métricas del usuario" });
+    }
+  });
+
   // Send reminder to specific user
   app.post("/api/reminders/send-to-user/:userId", requireAuth, async (req, res) => {
     try {
@@ -1339,6 +1453,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Error enviando recordatorio",
         error: error instanceof Error ? error.message : "Unknown error"
       });
+    }
+  });
+
+  // Get alerts for opportunities needing attention
+  app.get("/api/alerts", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+    try {
+      const businessAccountId = req.user.role === 'SUPER_ADMIN' 
+        ? req.query.businessAccountId 
+        : req.businessAccountId;
+      
+      if (!businessAccountId && req.user.role !== 'SUPER_ADMIN') {
+        return res.status(400).json({ message: "Business account required" });
+      }
+      
+      const opportunities = await storage.getOpportunities(businessAccountId);
+      const activities = await storage.getActivities(businessAccountId);
+      
+      const now = new Date();
+      const alerts: Array<{
+        type: 'stale_opportunity' | 'upcoming_close' | 'no_activity';
+        severity: 'high' | 'medium' | 'low';
+        message: string;
+        opportunityId: string;
+        opportunityTitle: string;
+        companyName: string;
+        sellerName: string;
+        daysSinceLastActivity?: number;
+        daysUntilClose?: number;
+      }> = [];
+      
+      // Group activities by opportunity
+      const activitiesByOpportunity = activities.reduce((acc, activity) => {
+        if (!acc[activity.opportunityId]) {
+          acc[activity.opportunityId] = [];
+        }
+        acc[activity.opportunityId].push(activity);
+        return acc;
+      }, {} as Record<string, typeof activities>);
+      
+      // Check each opportunity
+      for (const opp of opportunities) {
+        // Skip won/lost opportunities
+        if (opp.status === 'WON' || opp.status === 'LOST') continue;
+        
+        const oppActivities = activitiesByOpportunity[opp.id] || [];
+        const lastActivity = oppActivities.length > 0
+          ? oppActivities.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+          : null;
+        
+        const daysSinceLastActivity = lastActivity
+          ? Math.floor((now.getTime() - new Date(lastActivity.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+          : Math.floor((now.getTime() - new Date(opp.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Alert: No activity in 7+ days (HIGH severity)
+        if (daysSinceLastActivity >= 7) {
+          alerts.push({
+            type: 'stale_opportunity',
+            severity: daysSinceLastActivity >= 14 ? 'high' : 'medium',
+            message: `Sin actividad por ${daysSinceLastActivity} días`,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.company.name,
+            sellerName: opp.seller.name,
+            daysSinceLastActivity,
+          });
+        }
+        
+        // Alert: Upcoming close date (3 days or less)
+        if (opp.estimatedCloseDate) {
+          const closeDate = new Date(opp.estimatedCloseDate);
+          const daysUntilClose = Math.floor((closeDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysUntilClose >= 0 && daysUntilClose <= 3) {
+            alerts.push({
+              type: 'upcoming_close',
+              severity: daysUntilClose === 0 ? 'high' : daysUntilClose <= 1 ? 'high' : 'medium',
+              message: daysUntilClose === 0 
+                ? 'Fecha de cierre es hoy' 
+                : `Fecha de cierre en ${daysUntilClose} día${daysUntilClose > 1 ? 's' : ''}`,
+              opportunityId: opp.id,
+              opportunityTitle: opp.title,
+              companyName: opp.company.name,
+              sellerName: opp.seller.name,
+              daysUntilClose,
+            });
+          }
+        }
+        
+        // Alert: New opportunity with no activity (3+ days)
+        if (!lastActivity && daysSinceLastActivity >= 3) {
+          alerts.push({
+            type: 'no_activity',
+            severity: 'medium',
+            message: `Oportunidad nueva sin actividad (${daysSinceLastActivity} días)`,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.company.name,
+            sellerName: opp.seller.name,
+            daysSinceLastActivity,
+          });
+        }
+      }
+      
+      // Sort by severity (high first) and then by days
+      alerts.sort((a, b) => {
+        const severityOrder = { high: 0, medium: 1, low: 2 };
+        if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+          return severityOrder[a.severity] - severityOrder[b.severity];
+        }
+        const daysA = a.daysSinceLastActivity ?? a.daysUntilClose ?? 0;
+        const daysB = b.daysSinceLastActivity ?? b.daysUntilClose ?? 0;
+        return daysB - daysA;
+      });
+      
+      res.json(alerts);
+    } catch (error) {
+      console.error("Error fetching alerts:", error);
+      res.status(500).json({ message: "Error al obtener alertas" });
     }
   });
 
@@ -1394,6 +1626,531 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Email test error:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       res.status(500).json({ message: "Email service error", status: "error", error: errorMessage });
+    }
+  });
+
+  // ========== SAAS PLANS ROUTES ==========
+
+  // Plans Management Routes (SUPER_ADMIN only)
+  app.get("/api/plans", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const plans = await storage.getPlans();
+      res.json(plans);
+    } catch (error) {
+      console.error("Error fetching plans:", error);
+      res.status(500).json({ message: "Error al obtener planes" });
+    }
+  });
+
+  app.post("/api/plans", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const planData = insertPlanSchema.parse(req.body);
+      const plan = await storage.createPlan(planData);
+      res.json(plan);
+    } catch (error) {
+      console.error("Error creating plan:", error);
+      res.status(500).json({ message: "Error al crear plan" });
+    }
+  });
+
+  app.put("/api/plans/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const planData = insertPlanSchema.partial().parse(req.body);
+      const plan = await storage.updatePlan(id, planData);
+      
+      if (!plan) {
+        return res.status(404).json({ message: "Plan no encontrado" });
+      }
+      
+      res.json(plan);
+    } catch (error) {
+      console.error("Error updating plan:", error);
+      res.status(500).json({ message: "Error al actualizar plan" });
+    }
+  });
+
+  app.delete("/api/plans/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deletePlan(id);
+      
+      if (!deleted) {
+        return res.status(404).json({ message: "Plan no encontrado" });
+      }
+      
+      res.json({ message: "Plan eliminado correctamente" });
+    } catch (error) {
+      console.error("Error deleting plan:", error);
+      
+      // Check if it's a validation error (plan in use)
+      if (error instanceof Error && error.message.includes("está siendo usado por")) {
+        return res.status(400).json({ 
+          message: error.message,
+          type: "PLAN_IN_USE"
+        });
+      }
+      
+      res.status(500).json({ message: "Error al eliminar plan" });
+    }
+  });
+
+  // Update Plan Dual Prices (Monthly and Annual) with Customer Application Options
+  app.put("/api/plans/:id/prices", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { monthlyPrice, annualPrice, applyToExistingCustomers } = req.body;
+      
+      // Validate prices
+      if ((!monthlyPrice && !annualPrice) || 
+          (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
+          (annualPrice && isNaN(parseFloat(annualPrice)))) {
+        return res.status(400).json({ message: "Al menos un precio válido es requerido (mensual o anual)" });
+      }
+      
+      // Get current plan
+      const currentPlan = await storage.getPlan(id);
+      if (!currentPlan) {
+        return res.status(404).json({ message: "Plan no encontrado" });
+      }
+      
+      // Update the plan prices
+      const updateData: any = {};
+      if (monthlyPrice) {
+        updateData.monthlyPrice = monthlyPrice.toString();
+        updateData.price = monthlyPrice.toString(); // Keep legacy field updated
+      }
+      if (annualPrice) {
+        updateData.annualPrice = annualPrice.toString();
+      }
+      
+      const updatedPlan = await storage.updatePlan(id, updateData);
+      
+      if (!updatedPlan) {
+        return res.status(500).json({ message: "Error al actualizar plan" });
+      }
+      
+      // If applyToExistingCustomers is true, update all existing subscriptions
+      if (applyToExistingCustomers === true) {
+        try {
+          // Update business account plans that use this plan
+          await storage.updateBusinessAccountPlanDualPrices(id, {
+            monthlyPrice: monthlyPrice?.toString(),
+            annualPrice: annualPrice?.toString()
+          });
+          
+          console.log(`Updated dual prices for existing customers using plan ${id}`);
+        } catch (customerUpdateError) {
+          console.error("Error updating existing customer plan prices:", customerUpdateError);
+          // Continue execution - log error but don't fail the plan update
+        }
+      }
+      
+      res.json({
+        plan: updatedPlan,
+        message: applyToExistingCustomers 
+          ? "Plan actualizado y precios aplicados a clientes existentes" 
+          : "Plan actualizado para nuevos clientes únicamente",
+        appliedToExisting: applyToExistingCustomers || false
+      });
+      
+    } catch (error) {
+      console.error("Error updating plan prices:", error);
+      res.status(500).json({ message: "Error al actualizar precios del plan" });
+    }
+  });
+
+  // Products Management Routes (SUPER_ADMIN only)
+  app.get("/api/products", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const products = await storage.getProducts();
+      res.json(products);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res.status(500).json({ message: "Error al obtener productos" });
+    }
+  });
+
+  app.post("/api/products", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const productData = insertProductSchema.parse(req.body);
+      const product = await storage.createProduct(productData);
+      res.json(product);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      res.status(500).json({ message: "Error al crear producto" });
+    }
+  });
+
+  app.put("/api/products/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const productData = insertProductSchema.partial().parse(req.body);
+      const product = await storage.updateProduct(id, productData);
+      
+      if (!product) {
+        return res.status(404).json({ message: "Producto no encontrado" });
+      }
+      
+      res.json(product);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ message: "Error al actualizar producto" });
+    }
+  });
+
+  app.delete("/api/products/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteProduct(id);
+      
+      if (!deleted) {
+        return res.status(404).json({ message: "Producto no encontrado" });
+      }
+      
+      res.json({ message: "Producto eliminado correctamente" });
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      
+      // Check if it's a validation error (product in use)
+      if (error instanceof Error && error.message.includes("está siendo usado por")) {
+        return res.status(400).json({ 
+          message: error.message,
+          type: "PRODUCT_IN_USE"
+        });
+      }
+      
+      res.status(500).json({ message: "Error al eliminar producto" });
+    }
+  });
+
+  // Update Product Price with Customer Application Options (Legacy endpoint)
+  app.put("/api/products/:id/price", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { price, billingFrequency, applyToExistingCustomers } = req.body;
+      
+      // Validate price and billingFrequency
+      if (!price || isNaN(parseFloat(price))) {
+        return res.status(400).json({ message: "Precio válido es requerido" });
+      }
+      
+      if (!billingFrequency || !['MONTHLY', 'ANNUAL'].includes(billingFrequency)) {
+        return res.status(400).json({ message: "Frecuencia de facturación válida es requerida" });
+      }
+      
+      // Get current product
+      const currentProduct = await storage.getProduct(id);
+      if (!currentProduct) {
+        return res.status(404).json({ message: "Producto no encontrado" });
+      }
+      
+      // Update the product price and billing frequency
+      const updatedProduct = await storage.updateProduct(id, {
+        price: price.toString(),
+        billingFrequency
+      });
+      
+      if (!updatedProduct) {
+        return res.status(500).json({ message: "Error al actualizar producto" });
+      }
+      
+      // If applyToExistingCustomers is true, update all existing subscriptions
+      if (applyToExistingCustomers === true) {
+        try {
+          // Update business account products that use this product
+          await storage.updateBusinessAccountProductPrices(id, {
+            unitPrice: price.toString(),
+            billingFrequency
+          });
+          
+          console.log(`Updated price for existing customers using product ${id}`);
+        } catch (updateError) {
+          console.error("Error updating existing customer prices:", updateError);
+          // Don't fail the main operation, just log the error
+        }
+      }
+      
+      res.json({ 
+        message: applyToExistingCustomers 
+          ? "Precio actualizado para producto y clientes existentes" 
+          : "Precio actualizado solo para nuevos clientes",
+        product: updatedProduct 
+      });
+      
+    } catch (error) {
+      console.error("Error updating product price:", error);
+      res.status(500).json({ message: "Error al actualizar precio del producto" });
+    }
+  });
+
+  // Update Product Dual Prices (Monthly and Annual) with Customer Application Options
+  app.put("/api/products/:id/prices", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { monthlyPrice, annualPrice, applyToExistingCustomers } = req.body;
+      
+      // Validate prices
+      if ((!monthlyPrice && !annualPrice) || 
+          (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
+          (annualPrice && isNaN(parseFloat(annualPrice)))) {
+        return res.status(400).json({ message: "Al menos un precio válido es requerido (mensual o anual)" });
+      }
+      
+      // Get current product
+      const currentProduct = await storage.getProduct(id);
+      if (!currentProduct) {
+        return res.status(404).json({ message: "Producto no encontrado" });
+      }
+      
+      // Update the product prices
+      const updateData: any = {};
+      if (monthlyPrice) {
+        updateData.monthlyPrice = monthlyPrice.toString(); // Use camelCase for the storage method
+        updateData.price = monthlyPrice.toString(); // Keep legacy field updated
+      }
+      if (annualPrice) {
+        updateData.annualPrice = annualPrice.toString(); // Use camelCase for the storage method
+      }
+      
+      const updatedProduct = await storage.updateProduct(id, updateData);
+      
+      if (!updatedProduct) {
+        return res.status(500).json({ message: "Error al actualizar producto" });
+      }
+      
+      // If applyToExistingCustomers is true, update all existing subscriptions
+      if (applyToExistingCustomers === true) {
+        try {
+          // Update business account products that use this product
+          // For dual pricing, we update based on their current billing frequency
+          await storage.updateBusinessAccountProductDualPrices(id, {
+            monthlyPrice: monthlyPrice?.toString(),
+            annualPrice: annualPrice?.toString()
+          });
+          
+          console.log(`Updated dual prices for existing customers using product ${id}`);
+        } catch (updateError) {
+          console.error("Error updating existing customer prices:", updateError);
+          // Don't fail the main operation, just log the error
+        }
+      }
+      
+      res.json({ 
+        message: applyToExistingCustomers 
+          ? "Precios actualizados para producto y clientes existentes" 
+          : "Precios actualizados solo para nuevos clientes",
+        product: updatedProduct 
+      });
+      
+    } catch (error) {
+      console.error("Error updating product prices:", error);
+      res.status(500).json({ message: "Error al actualizar precios del producto" });
+    }
+  });
+
+  // Plan Modules Routes (SUPER_ADMIN only)
+  app.get("/api/plan-modules", requireAuth, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const planId = req.query.planId as string;
+      if (!planId) {
+        return res.status(400).json({ message: "Plan ID is required" });
+      }
+      
+      const modules = await storage.getPlanModules(planId);
+      res.json(modules);
+    } catch (error) {
+      console.error("Error fetching plan modules:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/plan-modules", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const planModuleData = insertPlanModuleSchema.parse(req.body);
+      const planModule = await storage.createPlanModule(planModuleData);
+      res.json(planModule);
+    } catch (error) {
+      console.error("Error creating plan module:", error);
+      res.status(500).json({ message: "Error al crear módulo de plan" });
+    }
+  });
+
+  // Available Plans for Business Accounts (all authenticated users can see these)
+  app.get("/api/plans/available", requireAuth, async (req, res) => {
+    try {
+      const plans = await storage.getPlans();
+      const activePlans = plans.filter(plan => plan.status === 'ACTIVE');
+      res.json(activePlans);
+    } catch (error) {
+      console.error("Error fetching available plans:", error);
+      res.status(500).json({ message: "Error al obtener planes disponibles" });
+    }
+  });
+
+  // Available Products for Business Accounts
+  app.get("/api/products/available", requireAuth, async (req, res) => {
+    try {
+      const products = await storage.getProducts();
+      const activeProducts = products.filter(product => product.isActive);
+      res.json(activeProducts);
+    } catch (error) {
+      console.error("Error fetching available products:", error);
+      res.status(500).json({ message: "Error al obtener productos disponibles" });
+    }
+  });
+
+  // Current Subscription for Business Account
+  app.get("/api/subscription", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      
+      // Get current plan
+      const currentPlan = await storage.getBusinessAccountPlan(businessAccountId);
+      
+      // Get additional products
+      const additionalProducts = await storage.getBusinessAccountProducts(businessAccountId);
+      
+      // Get usage data
+      const usageRecords = await storage.getPlanUsage(businessAccountId);
+      const usage: Record<string, { current: number; limit: number | null }> = {};
+      
+      for (const record of usageRecords) {
+        const currentCount = await storage.getCurrentUsageCount(businessAccountId, record.moduleType);
+        
+        // Get limit from plan modules
+        let limit = null;
+        if (currentPlan?.plan.modules) {
+          const planModule = currentPlan.plan.modules.find(m => m.moduleType === record.moduleType);
+          limit = planModule?.itemLimit || null;
+        }
+        
+        usage[record.moduleType] = { current: currentCount, limit };
+      }
+      
+      res.json({
+        currentPlan,
+        additionalProducts,
+        usage
+      });
+    } catch (error) {
+      console.error("Error fetching subscription:", error);
+      res.status(500).json({ message: "Error al obtener suscripción" });
+    }
+  });
+
+  // Change Plan
+  app.post("/api/subscription/change-plan", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { planId } = req.body;
+      const businessAccountId = req.businessAccountId;
+      
+      // Validate plan exists and is active
+      const newPlan = await storage.getPlan(planId);
+      if (!newPlan || newPlan.status !== 'ACTIVE') {
+        return res.status(400).json({ message: "Plan no válido" });
+      }
+      
+      // Check current subscription
+      const currentSubscription = await storage.getBusinessAccountPlan(businessAccountId);
+      
+      if (currentSubscription) {
+        // Update existing subscription
+        await storage.updateBusinessAccountPlan(currentSubscription.id, {
+          planId,
+          totalAmount: newPlan.price,
+          billingFrequency: newPlan.billingFrequency
+        });
+      } else {
+        // Create new subscription
+        const trialEndDate = new Date();
+        trialEndDate.setDate(trialEndDate.getDate() + newPlan.trialDays);
+        
+        await storage.createBusinessAccountPlan({
+          businessAccountId,
+          planId,
+          status: 'TRIAL',
+          trialEndDate,
+          billingFrequency: newPlan.billingFrequency,
+          totalAmount: newPlan.price,
+          currency: 'USD',
+          autoRenew: true
+        });
+      }
+      
+      res.json({ message: "Plan actualizado correctamente" });
+    } catch (error) {
+      console.error("Error changing plan:", error);
+      res.status(500).json({ message: "Error al cambiar plan" });
+    }
+  });
+
+  // Add Product
+  app.post("/api/subscription/add-product", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { productId, quantity = 1 } = req.body;
+      const businessAccountId = req.businessAccountId;
+      
+      // Validate product exists and is active
+      const product = await storage.getProduct(productId);
+      if (!product || !product.isActive) {
+        return res.status(400).json({ message: "Producto no válido" });
+      }
+      
+      const totalAmount = parseFloat(product.price) * quantity;
+      
+      await storage.createBusinessAccountProduct({
+        businessAccountId,
+        productId,
+        quantity,
+        status: 'ACTIVE',
+        unitPrice: product.price,
+        totalAmount: totalAmount.toString(),
+        billingFrequency: product.billingFrequency,
+        autoRenew: true
+      });
+      
+      res.json({ message: "Producto agregado correctamente" });
+    } catch (error) {
+      console.error("Error adding product:", error);
+      res.status(500).json({ message: "Error al agregar producto" });
+    }
+  });
+
+  // Remove Product
+  app.delete("/api/subscription/products/:productId", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { productId } = req.params;
+      const businessAccountId = req.businessAccountId;
+      
+      // Find the business account product
+      const products = await storage.getBusinessAccountProducts(businessAccountId);
+      const productToRemove = products.find(p => p.id === productId);
+      
+      if (!productToRemove) {
+        return res.status(404).json({ message: "Producto no encontrado en tu suscripción" });
+      }
+      
+      await storage.deleteBusinessAccountProduct(productId);
+      
+      res.json({ message: "Producto eliminado correctamente" });
+    } catch (error) {
+      console.error("Error removing product:", error);
+      res.status(500).json({ message: "Error al eliminar producto" });
+    }
+  });
+
+  // Module Permissions Check
+  app.get("/api/module-permissions/:moduleType", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { moduleType } = req.params;
+      const businessAccountId = req.businessAccountId;
+      
+      const permissions = await planService.getModulePermissions(businessAccountId, moduleType);
+      res.json(permissions);
+    } catch (error) {
+      console.error("Error getting module permissions:", error);
+      res.status(500).json({ message: "Error al obtener permisos del módulo" });
     }
   });
 

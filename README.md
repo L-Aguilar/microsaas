@@ -1,4 +1,4 @@
-# 🚀 BizFlowCRM - Sistema de Gestión Empresarial
+# 🚀 Controly - Sistema de Gestión Empresarial
 
 Un CRM moderno y completo para la gestión de empresas, clientes, oportunidades y actividades comerciales. Sistema profesional listo para producción con autenticación segura, dashboard ejecutivo y gestión completa de relaciones comerciales.
 
@@ -43,8 +43,8 @@ Un CRM moderno y completo para la gestión de empresas, clientes, oportunidades 
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/tu-usuario/bizflowcrm.git
-cd bizflowcrm
+git clone https://github.com/tu-usuario/controly.git
+cd controly
 ```
 
 ### 2. Instalar dependencias
@@ -168,7 +168,7 @@ npm run start
 ## 📁 Estructura del Proyecto
 
 ```
-BizFlowCRM/
+Controly/
 ├── client/                 # Frontend React
 │   ├── src/
 │   │   ├── components/     # Componentes reutilizables
@@ -227,4 +227,4 @@ Si tienes problemas o preguntas:
 
 ---
 
-**Desarrollado con ❤️ por el equipo BizFlowCRM**
+**Desarrollado con ❤️ por el equipo Controly**

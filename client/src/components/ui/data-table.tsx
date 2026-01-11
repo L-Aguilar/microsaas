@@ -57,6 +57,9 @@ export interface DataTableProps<T> {
   onRowClick?: (item: T) => void;
   className?: string;
   pageSizeOptions?: number[];
+  loading?: boolean;
+  onEdit?: (item: T) => void;
+  onDelete?: (item: T) => void;
 }
 
 export function DataTable<T extends { id: string }>({
@@ -66,7 +69,10 @@ export function DataTable<T extends { id: string }>({
   itemsPerPage = 10,
   onRowClick,
   className = "",
-  pageSizeOptions = [10, 25]
+  pageSizeOptions = [10, 25],
+  loading = false,
+  onEdit,
+  onDelete
 }: DataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortColumn, setSortColumn] = useState<string | null>(null);

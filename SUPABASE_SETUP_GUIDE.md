@@ -11,7 +11,7 @@
 1. Haz clic en "New Project"
 2. Elige tu organización
 3. Configura tu proyecto:
-   - **Name**: BizFlowCRM
+   - **Name**: Controly
    - **Database Password**: Usa una contraseña segura (guárdala)
    - **Region**: Elige la más cercana a tu ubicación
 4. Haz clic en "Create new project"
@@ -60,8 +60,8 @@ La aplicación debería:
 ## 🔑 Credenciales de Acceso Iniciales
 
 Una vez configurado, puedes acceder con:
-- **Email**: admin@bizflowcrm.com
-- **Password**: SecureAdmin2024!@#BizFlow
+- **Email**: admin@controly.com
+- **Password**: SecureAdmin2024!@#Controly
 
 ## 🔧 Solución de Problemas
 

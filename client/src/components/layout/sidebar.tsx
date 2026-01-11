@@ -2,13 +2,13 @@ import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebar } from "@/contexts/sidebar-context";
-import { useBusinessAccountHasModule } from "@/hooks/use-modules";
+import { useModulePermissions } from "@/hooks/use-module-permissions";
 import { ChartLine, ChartPie, Building, Target, BarChart3, LogOut, Users, Menu, Settings, User, ChevronDown, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { getCurrentThemeConfig } from "@shared/theme-config";
 
-const getNavigationForRole = (userRole: string, hasUsersModule: boolean, hasCompaniesModule: boolean, hasCRMModule: boolean) => {
+const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCompanies: boolean, canViewCRM: boolean, canViewReports: boolean) => {
   const baseNavigation = [
     { name: "Dashboard", href: "/", icon: ChartPie },
   ];
@@ -17,32 +17,39 @@ const getNavigationForRole = (userRole: string, hasUsersModule: boolean, hasComp
   if (userRole === 'SUPER_ADMIN') {
     baseNavigation.push(
       { name: "Cuentas de Negocio", href: "/business-accounts", icon: Building },
+      { name: "Gestión de Planes", href: "/plan-management", icon: Settings },
       { name: "Recordatorios", href: "/reminders", icon: Bell }
     );
     return baseNavigation;
   }
 
   // For BUSINESS_PLAN and USER roles - Module-based navigation
-  // Only show features if business account has the respective modules enabled
+  // Only show features if user has permissions to view the respective modules
   
   // Users module (only for BUSINESS_PLAN)
-  if (userRole === 'BUSINESS_PLAN' && hasUsersModule) {
+  if (userRole === 'BUSINESS_PLAN' && canViewUsers) {
     baseNavigation.push(
       { name: "Usuarios", href: "/users", icon: Users }
     );
   }
 
   // Companies module
-  if (hasCompaniesModule) {
+  if (canViewCompanies) {
     baseNavigation.push(
       { name: "Empresas", href: "/companies", icon: Building }
     );
   }
 
   // CRM module
-  if (hasCRMModule) {
+  if (canViewCRM) {
     baseNavigation.push(
-      { name: "Oportunidades", href: "/opportunities", icon: Target },
+      { name: "Oportunidades", href: "/opportunities", icon: Target }
+    );
+  }
+
+  // Reports module
+  if (canViewReports) {
+    baseNavigation.push(
       { name: "Reportes", href: "/reports", icon: BarChart3 }
     );
   }
@@ -56,9 +63,10 @@ export default function Sidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const { isCollapsed, isMobile, isOpen, toggleSidebar, closeSidebar } = useSidebar();
-  const { hasModule: hasUsersModule } = useBusinessAccountHasModule('USERS');
-  const { hasModule: hasCompaniesModule } = useBusinessAccountHasModule('COMPANIES');
-  const { hasModule: hasCRMModule } = useBusinessAccountHasModule('CRM');
+  const { canView: canViewUsers } = useModulePermissions('USERS');
+  const { canView: canViewCompanies } = useModulePermissions('COMPANIES');
+  const { canView: canViewCRM } = useModulePermissions('CRM');
+  const { canView: canViewReports } = useModulePermissions('REPORTS');
   const themeConfig = getCurrentThemeConfig();
 
   const handleLogout = () => {
@@ -108,7 +116,7 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 px-2 py-8 space-y-1">
-          {getNavigationForRole(user.role, hasUsersModule, hasCompaniesModule, hasCRMModule).map((item) => {
+          {getNavigationForRole(user.role, canViewUsers, canViewCompanies, canViewCRM, canViewReports).map((item) => {
             const isActive = location === item.href;
             const Icon = item.icon;
             

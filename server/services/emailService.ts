@@ -120,7 +120,7 @@ export async function sendBrevoWelcomeEmail(params: {
         <html>
         <head>
           <meta charset="utf-8">
-          <title>Recuperación de Contraseña - ShimliAdmin</title>
+          <title>Recuperación de Contraseña - Controly</title>
           <style>
             body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -137,11 +137,11 @@ export async function sendBrevoWelcomeEmail(params: {
           <div class="container">
             <div class="header">
               <h1>🔐 Recuperación de Contraseña</h1>
-              <p>ShimliAdmin - Sistema de Gestión</p>
+              <p>Controly - Sistema de Gestión</p>
             </div>
             <div class="content">
               <h2>Hola ${params.data.name},</h2>
-              <p>Hemos recibido una solicitud para recuperar tu contraseña en ShimliAdmin.</p>
+              <p>Hemos recibido una solicitud para recuperar tu contraseña en Controly.</p>
               <p>Tu nueva contraseña temporal es:</p>
               
               <div class="password-box">
@@ -163,8 +163,8 @@ export async function sendBrevoWelcomeEmail(params: {
               <p>Si no solicitaste este cambio de contraseña, por favor contacta al administrador del sistema.</p>
               
               <div class="footer">
-                <p>Este email fue enviado automáticamente por ShimliAdmin</p>
-                <p>© ${new Date().getFullYear()} ShimliAdmin - Todos los derechos reservados</p>
+                <p>Este email fue enviado automáticamente por Controly</p>
+                <p>© ${new Date().getFullYear()} Controly - Todos los derechos reservados</p>
               </div>
             </div>
           </div>
@@ -173,11 +173,11 @@ export async function sendBrevoWelcomeEmail(params: {
       `;
 
       textContent = `
-        Recuperación de Contraseña - ShimliAdmin
+        Recuperación de Contraseña - Controly
         
         Hola ${params.data.name},
         
-        Hemos recibido una solicitud para recuperar tu contraseña en ShimliAdmin.
+        Hemos recibido una solicitud para recuperar tu contraseña en Controly.
         
         Tu nueva contraseña temporal es: ${params.data.newPassword}
         
@@ -190,8 +190,8 @@ export async function sendBrevoWelcomeEmail(params: {
         
         Si no solicitaste este cambio de contraseña, por favor contacta al administrador del sistema.
         
-        Este email fue enviado automáticamente por ShimliAdmin
-        © ${new Date().getFullYear()} ShimliAdmin - Todos los derechos reservados
+        Este email fue enviado automáticamente por Controly
+        © ${new Date().getFullYear()} Controly - Todos los derechos reservados
       `;
     }
 
@@ -200,7 +200,7 @@ export async function sendBrevoWelcomeEmail(params: {
       to: params.to,
       toName: params.data.name,
       from: process.env.FROM_EMAIL || 'noreply@sheilim.com',
-      fromName: process.env.FROM_NAME || 'ShimliAdmin',
+      fromName: process.env.FROM_NAME || 'Controly',
       subject: params.subject,
       htmlContent,
       textContent

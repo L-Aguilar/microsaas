@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useModulePermissions } from "@/hooks/use-module-permissions";
 import { Badge } from "@/components/ui/badge";
 import { 
   Trophy, 
@@ -32,17 +33,44 @@ interface ReportStats {
 }
 
 export default function Reports() {
+  const { canView, isLoading: permissionsLoading } = useModulePermissions('REPORTS');
+  
   const { data: stats, isLoading: statsLoading } = useQuery<ReportStats>({
     queryKey: ["/api/reports/stats"],
+    enabled: canView, // Solo cargar datos si tiene permisos
   });
 
   const { data: opportunities = [] } = useQuery<OpportunityWithRelations[]>({
     queryKey: ["/api/opportunities"],
+    enabled: canView, // Solo cargar datos si tiene permisos
   });
 
   const { data: companies = [] } = useQuery<CompanyWithRelations[]>({
     queryKey: ["/api/companies"],
   });
+
+  // Verificar permisos primero
+  if (permissionsLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+            <BarChart3 className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Módulo de Reportes No Disponible</h3>
+          <p className="text-gray-600">Este módulo no está incluido en tu plan actual.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (statsLoading) {
     return (
@@ -54,18 +82,15 @@ export default function Reports() {
 
   const statusLabels = {
     NEW: "Nuevas",
-    QUALIFYING: "Calificación",
-    PROPOSAL: "Propuesta",
+    IN_PROGRESS: "En Proceso",
     NEGOTIATION: "Negociación",
     WON: "Ganadas",
     LOST: "Perdidas",
-    ON_HOLD: "En Espera",
   };
 
   const activityLabels = {
     CALL: "Llamadas",
     MEETING: "Reuniones",
-    AGREEMENT: "Acuerdos",
     NOTE: "Notas",
   };
 
@@ -74,9 +99,9 @@ export default function Reports() {
   const wonOpportunities = opportunities.filter(opp => opp.status === 'WON').length;
   const lostOpportunities = opportunities.filter(opp => opp.status === 'LOST').length;
   const inProgressOpportunities = opportunities.filter(opp => 
-    ['NEW', 'QUALIFYING', 'PROPOSAL', 'NEGOTIATION'].includes(opp.status)
+    ['NEW', 'IN_PROGRESS', 'NEGOTIATION'].includes(opp.status)
   ).length;
-  const onHoldOpportunities = opportunities.filter(opp => opp.status === 'ON_HOLD').length;
+  const onHoldOpportunities = 0; // Currently no ON_HOLD status in schema
   
   const conversionRate = totalOpportunities > 0 ? (wonOpportunities / totalOpportunities) * 100 : 0;
   const lossRate = totalOpportunities > 0 ? (lostOpportunities / totalOpportunities) * 100 : 0;

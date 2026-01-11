@@ -4,29 +4,74 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-import { Plus, Users, Mail, Phone, Trash2, Edit, Eye } from "lucide-react";
-import { User } from "@shared/schema";
+import { Plus, Users, Mail, Phone, Trash2, Edit, Eye, TrendingUp, Target, Activity, Award, BarChart3, ArrowRight } from "lucide-react";
+import { User, OpportunityWithRelations } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useModulePermissions } from "@/hooks/use-module-permissions";
 import UserForm from "@/components/forms/user-form";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { useLocation } from "wouter";
+
+interface UserMetrics {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  };
+  metrics: {
+    totalOpportunities: number;
+    wonOpportunities: number;
+    lostOpportunities: number;
+    inProgressOpportunities: number;
+    conversionRate: number;
+    activitiesThisWeek: number;
+    totalActivities: number;
+  };
+  opportunitiesByStatus: Record<string, number>;
+  recentOpportunities: Array<{
+    id: string;
+    title: string;
+    status: string;
+    companyName: string;
+    createdAt: string;
+    estimatedCloseDate: string | null;
+  }>;
+  recentActivities: Array<{
+    id: string;
+    type: string;
+    details: string;
+    activityDate: string;
+    opportunityTitle: string;
+    createdAt: string;
+  }>;
+}
 
 export default function UsersPage() {
   const [showNewUserModal, setShowNewUserModal] = useState(false);
   const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [viewingUserMetrics, setViewingUserMetrics] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
+  const [, setLocation] = useLocation();
+  const { canCreate, canEdit, canDelete, isAtLimit, currentCount, itemLimit } = useModulePermissions('USERS');
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/users"],
+  });
+
+  const { data: userMetrics, isLoading: metricsLoading } = useQuery<UserMetrics>({
+    queryKey: ["/api/users", viewingUserMetrics, "metrics"],
+    enabled: !!viewingUserMetrics,
   });
 
   const deleteUserMutation = useMutation({
@@ -59,6 +104,10 @@ export default function UsersPage() {
     setShowEditUserModal(true);
   };
 
+  const handleViewMetrics = (userId: string) => {
+    setViewingUserMetrics(userId);
+  };
+
   const confirmDelete = () => {
     if (userToDelete) {
       deleteUserMutation.mutate(userToDelete.id);
@@ -86,10 +135,24 @@ export default function UsersPage() {
       case 'BUSINESS_PLAN':
         return 'Admin Empresa';
       case 'USER':
-        return 'Usuario';
+        return 'Vendedor';
       default:
         return role;
     }
+  };
+
+  const statusLabels = {
+    NEW: "Nueva",
+    IN_PROGRESS: "En Proceso",
+    NEGOTIATION: "Negociación",
+    WON: "Ganada",
+    LOST: "Perdida",
+  };
+
+  const activityTypeLabels = {
+    CALL: "Llamada",
+    MEETING: "Reunión",
+    NOTE: "Nota",
   };
 
   // Only SUPER_ADMIN and BUSINESS_PLAN can access user management
@@ -98,13 +161,15 @@ export default function UsersPage() {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <h2 className="text-xl font-semibold text-foreground mb-2">Acceso Restringido</h2>
-          <p className="text-muted-foreground">Solo los administradores pueden gestionar usuarios.</p>
+          <p className="text-muted-foreground">No tienes permisos para acceder a esta sección</p>
         </div>
       </div>
     );
   }
 
-  // Definir columnas de la tabla
+  // Filter out SUPER_ADMIN from the list (they shouldn't be managed here)
+  const displayUsers = users.filter(user => user.role !== 'SUPER_ADMIN');
+
   const columns: Column<User>[] = [
     {
       key: "name",
@@ -120,22 +185,22 @@ export default function UsersPage() {
       sortable: true,
       width: "w-1/4",
       render: (value) => (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center space-x-2">
           <Mail className="h-4 w-4 text-gray-400" />
-          <span className="font-mono text-sm">{value}</span>
+          <span>{value}</span>
         </div>
       ),
     },
     {
       key: "phone",
       header: "Teléfono",
-      accessor: (user) => user.phone,
+      accessor: (user) => user.phone || 'No especificado',
       sortable: true,
       width: "w-1/6",
       render: (value) => (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center space-x-2">
           <Phone className="h-4 w-4 text-gray-400" />
-          <span className="font-mono text-sm">{value || '-'}</span>
+          <span>{value}</span>
         </div>
       ),
     },
@@ -152,44 +217,40 @@ export default function UsersPage() {
       ),
     },
     {
-      key: "createdAt",
-      header: "Fecha de Creación",
-      accessor: (user) => user.createdAt,
-      sortable: true,
-      width: "w-1/6",
-      render: (value) => (
-        <span className="text-sm text-gray-600">
-          {format(new Date(value), 'dd/MM/yyyy', { locale: es })}
-        </span>
-      ),
-    },
-    {
       key: "actions",
       header: "Acciones",
-      accessor: () => null,
-      width: "w-32",
+      accessor: () => "",
+      sortable: false,
+      width: "w-1/4",
       render: (_, user) => (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center space-x-2">
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleEditUser(user);
-            }}
-            className="h-8 w-8 p-0"
+            onClick={() => handleViewMetrics(user.id)}
+            className="h-8"
+          >
+            <BarChart3 className="h-4 w-4 mr-1" />
+            Métricas
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleEditUser(user)}
+            className="h-8"
+            disabled={!canEdit}
+            title={!canEdit ? "No tienes permisos para editar usuarios" : ""}
           >
             <Edit className="h-4 w-4" />
           </Button>
-          {currentUser?.id !== user.id && (
+          {user.role !== 'BUSINESS_PLAN' && canDelete && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDeleteUser(user);
-              }}
-              className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+              onClick={() => handleDeleteUser(user)}
+              className="h-8 text-destructive hover:text-destructive"
+              disabled={!canDelete}
+              title={!canDelete ? "No tienes permisos para eliminar usuarios" : ""}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -199,110 +260,272 @@ export default function UsersPage() {
     },
   ];
 
-  const handleRowClick = (user: User) => {
-    handleEditUser(user);
-  };
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando usuarios...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Información de límites del plan */}
+      {itemLimit && (
+        <Card className={`${currentCount >= itemLimit ? 'border-red-200 bg-red-50' : 
+                           currentCount >= itemLimit * 0.8 ? 'border-yellow-200 bg-yellow-50' : 
+                           'border-blue-200 bg-blue-50'}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Límite de Usuarios</h4>
+                <p className="text-sm text-muted-foreground">
+                  {currentCount} de {itemLimit} usuarios utilizados
+                  {currentCount >= itemLimit && " - Has alcanzado el límite de tu plan"}
+                  {currentCount >= itemLimit * 0.8 && currentCount < itemLimit && " - Te acercas al límite de tu plan"}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${currentCount >= itemLimit ? 'bg-red-500' : 
+                                                    currentCount >= itemLimit * 0.8 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                    style={{ width: `${Math.min((currentCount / itemLimit) * 100, 100)}%` }}
+                  ></div>
+                </div>
+                <span className="text-sm font-medium">{Math.round((currentCount / itemLimit) * 100)}%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Usuarios</h1>
-          <p className="text-muted-foreground">
-            Gestiona los usuarios del sistema y sus permisos.
-          </p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Vendedores</h1>
+          <p className="text-muted-foreground mt-1">Gestiona tu equipo de ventas y sus métricas</p>
         </div>
-        <Button onClick={() => setShowNewUserModal(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Nuevo Usuario
+        <Button 
+          onClick={() => setShowNewUserModal(true)} 
+          className="bg-brand-500 hover:bg-brand-600"
+          disabled={!canCreate || isAtLimit}
+          title={!canCreate ? "No tienes permisos para crear usuarios" : 
+                 isAtLimit ? `Has alcanzado el límite de ${itemLimit} usuarios` : ""}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Nuevo Vendedor
+          {isAtLimit && itemLimit && (
+            <span className="ml-2 text-xs">({currentCount}/{itemLimit})</span>
+          )}
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+        </div>
+      ) : displayUsers.length === 0 ? (
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Total Usuarios</p>
-                <p className="text-2xl font-bold text-foreground">{users.length}</p>
-              </div>
+          <CardContent className="py-12 text-center">
+            <Users className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-foreground">No hay vendedores</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Comienza agregando tu primer vendedor al equipo.
+            </p>
+            <div className="mt-6">
+              <Button 
+                onClick={() => setShowNewUserModal(true)}
+                disabled={!canCreate || isAtLimit}
+                title={!canCreate ? "No tienes permisos para crear usuarios" : 
+                       isAtLimit ? `Has alcanzado el límite de ${itemLimit} usuarios` : ""}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar Vendedor
+              </Button>
             </div>
           </CardContent>
         </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Lista de Vendedores</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DataTable data={displayUsers} columns={columns} />
+            </CardContent>
+          </Card>
+        </>
+      )}
 
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-green-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Usuarios Activos</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {users.filter(user => user.role !== 'SUPER_ADMIN').length}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-purple-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Administradores</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {users.filter(user => user.role === 'BUSINESS_PLAN').length}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Lista de Usuarios
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <DataTable
-            data={users}
-            columns={columns}
-            searchPlaceholder="Buscar usuarios por nombre, email..."
-                            itemsPerPage={10}
-            onRowClick={handleRowClick}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Modal para nuevo usuario */}
-      <Dialog open={showNewUserModal} onOpenChange={setShowNewUserModal}>
-        <DialogContent className="max-w-2xl">
+      {/* User Metrics Modal */}
+      <Dialog open={!!viewingUserMetrics} onOpenChange={(open) => !open && setViewingUserMetrics(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Crear Nuevo Usuario</DialogTitle>
+            <DialogTitle>
+              {userMetrics ? `Métricas de ${userMetrics.user.name}` : 'Cargando métricas...'}
+            </DialogTitle>
             <DialogDescription>
-              Completa la información para crear un nuevo usuario en el sistema.
+              Rendimiento y actividad del vendedor
+            </DialogDescription>
+          </DialogHeader>
+
+          {metricsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+            </div>
+          ) : userMetrics ? (
+            <div className="space-y-6 mt-4">
+              {/* Metrics Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Total Oportunidades</p>
+                        <p className="text-2xl font-bold">{userMetrics.metrics.totalOpportunities}</p>
+                      </div>
+                      <Target className="h-8 w-8 text-blue-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Ganadas</p>
+                        <p className="text-2xl font-bold text-green-600">{userMetrics.metrics.wonOpportunities}</p>
+                      </div>
+                      <Award className="h-8 w-8 text-green-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Tasa de Cierre</p>
+                        <p className="text-2xl font-bold">{userMetrics.metrics.conversionRate.toFixed(1)}%</p>
+                      </div>
+                      <TrendingUp className="h-8 w-8 text-purple-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Actividades (Semana)</p>
+                        <p className="text-2xl font-bold">{userMetrics.metrics.activitiesThisWeek}</p>
+                      </div>
+                      <Activity className="h-8 w-8 text-orange-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Opportunities by Status */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Oportunidades por Estado</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    {Object.entries(userMetrics.opportunitiesByStatus).map(([status, count]) => (
+                      <div key={status} className="text-center p-4 bg-gray-50 rounded-lg">
+                        <p className="text-2xl font-bold">{count}</p>
+                        <p className="text-sm text-muted-foreground">{statusLabels[status as keyof typeof statusLabels] || status}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Recent Opportunities */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Oportunidades Recientes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {userMetrics.recentOpportunities.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-4">No hay oportunidades</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {userMetrics.recentOpportunities.map((opp) => (
+                        <div
+                          key={opp.id}
+                          className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                          onClick={() => {
+                            setViewingUserMetrics(null);
+                            setLocation(`/opportunities/${opp.id}`);
+                          }}
+                        >
+                          <div className="flex-1">
+                            <p className="font-medium">{opp.title}</p>
+                            <p className="text-sm text-muted-foreground">{opp.companyName}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {format(new Date(opp.createdAt), "PPP", { locale: es })}
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <Badge className={
+                              opp.status === 'WON' ? 'bg-green-100 text-green-800' :
+                              opp.status === 'LOST' ? 'bg-red-100 text-red-800' :
+                              opp.status === 'NEGOTIATION' ? 'bg-orange-100 text-orange-800' :
+                              'bg-blue-100 text-blue-800'
+                            }>
+                              {statusLabels[opp.status as keyof typeof statusLabels] || opp.status}
+                            </Badge>
+                            <ArrowRight className="h-4 w-4 text-gray-400" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Recent Activities */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Actividades Recientes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {userMetrics.recentActivities.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-4">No hay actividades</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {userMetrics.recentActivities.map((activity) => (
+                        <div key={activity.id} className="p-3 border rounded-lg">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-2 mb-1">
+                                <Badge variant="outline">
+                                  {activityTypeLabels[activity.type as keyof typeof activityTypeLabels] || activity.type}
+                                </Badge>
+                                <span className="text-sm font-medium">{activity.opportunityTitle}</span>
+                              </div>
+                              {activity.details && (
+                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2" dangerouslySetInnerHTML={{ __html: activity.details }} />
+                              )}
+                              <p className="text-xs text-muted-foreground mt-2">
+                                {format(new Date(activity.activityDate), "PPP 'a las' p", { locale: es })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create User Modal */}
+      <Dialog open={showNewUserModal} onOpenChange={setShowNewUserModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo Vendedor</DialogTitle>
+            <DialogDescription>
+              Agrega un nuevo vendedor a tu equipo
             </DialogDescription>
           </DialogHeader>
           <UserForm
@@ -315,13 +538,13 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal para editar usuario */}
+      {/* Edit User Modal */}
       <Dialog open={showEditUserModal} onOpenChange={setShowEditUserModal}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Editar Usuario</DialogTitle>
+            <DialogTitle>Editar Vendedor</DialogTitle>
             <DialogDescription>
-              Modifica la información del usuario seleccionado.
+              Modifica la información del vendedor
             </DialogDescription>
           </DialogHeader>
           {selectedUser && (
@@ -341,15 +564,13 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Diálogo de confirmación para eliminar */}
+      {/* Delete Confirmation Dialog */}
       <ConfirmationDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
-        title="Eliminar Usuario"
-        description={`¿Estás seguro de que quieres eliminar a "${userToDelete?.name}"? Esta acción no se puede deshacer.`}
         onConfirm={confirmDelete}
-        confirmText="Eliminar"
-        cancelText="Cancelar"
+        title="Eliminar Vendedor"
+        description={`¿Estás seguro de que deseas eliminar a ${userToDelete?.name}? Esta acción no se puede deshacer.`}
       />
     </div>
   );

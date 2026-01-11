@@ -17,6 +17,7 @@ const getNavigationForRole = (userRole: string, hasUsersModule: boolean, hasComp
   if (userRole === 'SUPER_ADMIN') {
     baseNavigation.push(
       { name: "Cuentas de Negocio", href: "/business-accounts", icon: Building },
+      { name: "Gestión de Planes", href: "/plan-management", icon: Settings },
       { name: "Recordatorios", href: "/reminders", icon: Bell }
     );
     return baseNavigation;

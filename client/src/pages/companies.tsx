@@ -11,6 +11,7 @@ import { CompanyWithRelations } from "@shared/schema";
 import CompanyForm from "@/components/forms/company-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useModulePermissions } from "@/hooks/use-module-permissions";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -24,6 +25,7 @@ export default function Companies() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const { canCreate, canEdit, canDelete, isAtLimit, currentCount, itemLimit } = useModulePermissions('COMPANIES');
 
   const { data: companies = [], isLoading } = useQuery<CompanyWithRelations[]>({
     queryKey: ["/api/companies"],
@@ -187,20 +189,26 @@ export default function Companies() {
               handleEdit(company);
             }}
             className="h-8 w-8 p-0"
+            disabled={!canEdit}
+            title={!canEdit ? "No tienes permisos para editar empresas" : ""}
           >
             <Edit className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete(company.id);
-            }}
-            className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(company.id);
+              }}
+              className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+              disabled={!canDelete}
+              title={!canDelete ? "No tienes permisos para eliminar empresas" : ""}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ),
     },
@@ -220,6 +228,36 @@ export default function Companies() {
 
   return (
     <div className="space-y-6">
+      {/* Información de límites del plan */}
+      {itemLimit && (
+        <Card className={`${currentCount >= itemLimit ? 'border-red-200 bg-red-50' : 
+                           currentCount >= itemLimit * 0.8 ? 'border-yellow-200 bg-yellow-50' : 
+                           'border-blue-200 bg-blue-50'}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">Límite de Empresas</h4>
+                <p className="text-sm text-muted-foreground">
+                  {currentCount} de {itemLimit} empresas utilizadas
+                  {currentCount >= itemLimit && " - Has alcanzado el límite de tu plan"}
+                  {currentCount >= itemLimit * 0.8 && currentCount < itemLimit && " - Te acercas al límite de tu plan"}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-16 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${currentCount >= itemLimit ? 'bg-red-500' : 
+                                                    currentCount >= itemLimit * 0.8 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                    style={{ width: `${Math.min((currentCount / itemLimit) * 100, 100)}%` }}
+                  ></div>
+                </div>
+                <span className="text-sm font-medium">{Math.round((currentCount / itemLimit) * 100)}%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Empresas</h1>
@@ -227,9 +265,17 @@ export default function Companies() {
             Gestiona las empresas y clientes de tu organización.
           </p>
         </div>
-                    <Button onClick={() => setShowCreateModal(true)}>
+        <Button 
+          onClick={() => setShowCreateModal(true)}
+          disabled={!canCreate || isAtLimit}
+          title={!canCreate ? "No tienes permisos para crear empresas" : 
+                 isAtLimit ? `Has alcanzado el límite de ${itemLimit} empresas` : ""}
+        >
           <Plus className="mr-2 h-4 w-4" />
           Nueva Empresa
+          {isAtLimit && itemLimit && (
+            <span className="ml-2 text-xs">({currentCount}/{itemLimit})</span>
+          )}
         </Button>
       </div>
 

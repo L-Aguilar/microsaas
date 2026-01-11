@@ -6,10 +6,16 @@ import { z } from "zod";
 // Enums
 export const companyStatusEnum = pgEnum('company_status', ['LEAD', 'ACTIVE', 'INACTIVE', 'BLOCKED', 'DELETED']);
 export const opportunityTypeEnum = pgEnum('opportunity_type', ['NEW_CLIENT', 'ADDITIONAL_PROJECT']);
-export const opportunityStatusEnum = pgEnum('opportunity_status', ['NEW', 'QUALIFYING', 'PROPOSAL', 'NEGOTIATION', 'WON', 'LOST', 'ON_HOLD']);
-export const activityTypeEnum = pgEnum('activity_type', ['CALL', 'MEETING', 'AGREEMENT', 'NOTE']);
+export const opportunityStatusEnum = pgEnum('opportunity_status', ['NEW', 'IN_PROGRESS', 'NEGOTIATION', 'WON', 'LOST']);
+export const activityTypeEnum = pgEnum('activity_type', ['CALL', 'MEETING', 'NOTE']);
 export const userRoleEnum = pgEnum('user_role', ['SUPER_ADMIN', 'BUSINESS_PLAN', 'USER']);
-export const moduleTypeEnum = pgEnum('module_type', ['USERS', 'COMPANIES', 'CRM', 'BILLING', 'INVENTORY', 'HR', 'ANALYTICS']);
+export const moduleTypeEnum = pgEnum('module_type', ['USERS', 'COMPANIES', 'CRM', 'REPORTS']);
+
+// SaaS Plan and Billing Enums
+export const billingFrequencyEnum = pgEnum('billing_frequency', ['MONTHLY', 'ANNUAL']);
+export const planStatusEnum = pgEnum('plan_status', ['ACTIVE', 'INACTIVE', 'DEPRECATED']);
+export const productTypeEnum = pgEnum('product_type', ['MODULE', 'USER_ADDON', 'FEATURE_ADDON', 'STORAGE_ADDON']);
+export const subscriptionStatusEnum = pgEnum('subscription_status', ['TRIAL', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED']);
 
 // Users table
 export const users = pgTable("users", {
@@ -187,6 +193,8 @@ export type InsertBusinessAccount = z.infer<typeof insertBusinessAccountSchema>;
 export type BusinessAccountModule = typeof businessAccountModules.$inferSelect;
 export type InsertBusinessAccountModule = z.infer<typeof insertBusinessAccountModuleSchema>;
 
+// SaaS Plans Types (to be added at end of file after table definitions)
+
 // Extended types with relations
 export type OpportunityWithRelations = Opportunity & {
   company: CompanyWithRelations;
@@ -224,24 +232,151 @@ export type ActivityWithRelations = Activity & {
   opportunity: OpportunityWithRelations;
 };
 
-// Module constants - Only modules that are fully implemented
+// SaaS Plans Extended Types with Relations (moved to end of file)
+
+// Plan Limit Check Types
+export type LimitCheckResult = {
+  canProceed: boolean;
+  currentCount: number;
+  limit: number | null; // null = unlimited
+  message?: string;
+};
+
+export type ModulePermissions = {
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canView: boolean;
+  itemLimit: number | null; // null = unlimited
+  currentCount: number;
+  isAtLimit: boolean;
+  isNearLimit: boolean;
+};
+
+// Module constants - ONLY modules that actually exist in the system
 export const AVAILABLE_MODULES = {
   USERS: {
     name: 'Usuarios',
     type: 'USERS' as const,
-    description: 'Gestión de usuarios y permisos dentro de la organización'
+    description: 'Gestión de usuarios y permisos dentro de la organización',
+    hasLimits: true,
+    defaultLimit: 5
   },
   COMPANIES: {
     name: 'Empresas',
-    type: 'COMPANIES' as const,
-    description: 'Gestión de empresas y contactos comerciales'
+    type: 'COMPANIES' as const, 
+    description: 'Gestión de empresas y contactos comerciales',
+    hasLimits: true,
+    defaultLimit: 100
   },
   CRM: {
     name: 'CRM',
     type: 'CRM' as const,
-    description: 'Gestión de relaciones con clientes, oportunidades y actividades'
+    description: 'Gestión de relaciones con clientes, oportunidades y actividades',
+    hasLimits: false,
+    defaultLimit: null
+  },
+  REPORTS: {
+    name: 'Reportes',
+    type: 'REPORTS' as const,
+    description: 'Generación de reportes y análisis del negocio',
+    hasLimits: false,
+    defaultLimit: null
   }
 } as const;
+
+// SaaS Plans table
+export const plans = pgTable("plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull().default('0.00'), // Legacy field for compatibility
+  monthlyPrice: decimal("monthly_price", { precision: 10, scale: 2 }),
+  annualPrice: decimal("annual_price", { precision: 10, scale: 2 }),
+  billingFrequency: billingFrequencyEnum("billing_frequency").notNull().default('MONTHLY'), // Legacy field
+  trialDays: integer("trial_days").notNull().default(14),
+  status: planStatusEnum("status").notNull().default('ACTIVE'),
+  isDefault: boolean("is_default").default(false).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  displayOrder: integer("display_order").default(0).notNull(),
+  features: text("features").array(), // JSON array of feature descriptions
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Independent Products table (add-ons, extra features, etc.)
+export const products = pgTable("products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  type: productTypeEnum("type").notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(), // Legacy field for compatibility
+  monthlyPrice: decimal("monthly_price", { precision: 10, scale: 2 }),
+  annualPrice: decimal("annual_price", { precision: 10, scale: 2 }),
+  billingFrequency: billingFrequencyEnum("billing_frequency").notNull().default('MONTHLY'), // Legacy field
+  moduleType: moduleTypeEnum("module_type"), // For MODULE and FEATURE_ADDON types
+  isActive: boolean("is_active").default(true).notNull(),
+  metadata: text("metadata"), // JSON for extra configuration
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Plan Modules - defines what modules are included in each plan and their limits
+export const planModules = pgTable("plan_modules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").references(() => plans.id).notNull(),
+  moduleType: moduleTypeEnum("module_type").notNull(),
+  isIncluded: boolean("is_included").default(true).notNull(),
+  itemLimit: integer("item_limit"), // null = unlimited, number = limit (e.g., max users, companies)
+  canCreate: boolean("can_create").default(true).notNull(),
+  canEdit: boolean("can_edit").default(true).notNull(),
+  canDelete: boolean("can_delete").default(true).notNull(),
+  features: text("features").array(), // Specific features for this module in this plan
+});
+
+// Business Account Plans - current plan subscription for each business account
+export const businessAccountPlans = pgTable("business_account_plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessAccountId: varchar("business_account_id").references(() => businessAccounts.id).notNull(),
+  planId: varchar("plan_id").references(() => plans.id).notNull(),
+  status: subscriptionStatusEnum("status").notNull().default('TRIAL'),
+  trialStartDate: timestamp("trial_start_date").defaultNow(),
+  trialEndDate: timestamp("trial_end_date"),
+  subscriptionStartDate: timestamp("subscription_start_date"),
+  subscriptionEndDate: timestamp("subscription_end_date"),
+  autoRenew: boolean("auto_renew").default(true).notNull(),
+  billingFrequency: billingFrequencyEnum("billing_frequency").notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull().default('0.00'),
+  currency: text("currency").default('USD').notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Business Account Products - additional products/add-ons subscribed by business accounts
+export const businessAccountProducts = pgTable("business_account_products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessAccountId: varchar("business_account_id").references(() => businessAccounts.id).notNull(),
+  productId: varchar("product_id").references(() => products.id).notNull(),
+  quantity: integer("quantity").default(1).notNull(), // for USER_ADDON etc.
+  status: subscriptionStatusEnum("status").notNull().default('ACTIVE'),
+  subscriptionStartDate: timestamp("subscription_start_date").defaultNow(),
+  subscriptionEndDate: timestamp("subscription_end_date"),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  billingFrequency: billingFrequencyEnum("billing_frequency").notNull(),
+  autoRenew: boolean("auto_renew").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Plan Usage Tracking - tracks current usage for limit enforcement
+export const planUsage = pgTable("plan_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessAccountId: varchar("business_account_id").references(() => businessAccounts.id).notNull(),
+  moduleType: moduleTypeEnum("module_type").notNull(),
+  currentCount: integer("current_count").default(0).notNull(),
+  lastCalculated: timestamp("last_calculated").defaultNow().notNull(),
+});
 
 // Stats type for reports
 export type DashboardStats = {
@@ -253,4 +388,73 @@ export type DashboardStats = {
   opportunitiesByStatus: Record<string, number>;
   amountsBySeller: Record<string, number>;
   activitiesByType: Record<string, number>;
+};
+
+// SaaS Plans Insert Schemas (after table definitions)
+export const insertPlanSchema = createInsertSchema(plans).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPlanModuleSchema = createInsertSchema(planModules).omit({
+  id: true,
+});
+
+export const insertBusinessAccountPlanSchema = createInsertSchema(businessAccountPlans).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertBusinessAccountProductSchema = createInsertSchema(businessAccountProducts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPlanUsageSchema = createInsertSchema(planUsage).omit({
+  id: true,
+  lastCalculated: true,
+});
+
+// SaaS Plans Types
+export type Plan = typeof plans.$inferSelect;
+export type InsertPlan = z.infer<typeof insertPlanSchema>;
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type PlanModule = typeof planModules.$inferSelect;
+export type InsertPlanModule = z.infer<typeof insertPlanModuleSchema>;
+export type BusinessAccountPlan = typeof businessAccountPlans.$inferSelect;
+export type InsertBusinessAccountPlan = z.infer<typeof insertBusinessAccountPlanSchema>;
+export type BusinessAccountProduct = typeof businessAccountProducts.$inferSelect;
+export type InsertBusinessAccountProduct = z.infer<typeof insertBusinessAccountProductSchema>;
+export type PlanUsage = typeof planUsage.$inferSelect;
+export type InsertPlanUsage = z.infer<typeof insertPlanUsageSchema>;
+
+// SaaS Plans Extended Types with Relations
+export type PlanWithModules = Plan & {
+  modules: PlanModule[];
+};
+
+export type BusinessAccountPlanWithRelations = BusinessAccountPlan & {
+  plan: PlanWithModules;
+  businessAccount: BusinessAccount;
+};
+
+export type BusinessAccountProductWithRelations = BusinessAccountProduct & {
+  product: Product;
+  businessAccount: BusinessAccount;
+};
+
+export type BusinessAccountWithPlan = BusinessAccount & {
+  currentPlan?: BusinessAccountPlanWithRelations;
+  additionalProducts: BusinessAccountProductWithRelations[];
+  usage: PlanUsage[];
 };

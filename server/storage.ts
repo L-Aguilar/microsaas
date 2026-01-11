@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type UpdateUser, type Company, type InsertCompany, type UpdateCompany, type Opportunity, type InsertOpportunity, type UpdateOpportunity, type Activity, type InsertActivity, type OpportunityWithRelations, type CompanyWithRelations, type ActivityWithRelations, type Module, type InsertModule, type BusinessAccount, type InsertBusinessAccount, type BusinessAccountModule, type InsertBusinessAccountModule, type ModuleWithStatus, type BusinessAccountWithRelations, type UserWithBusinessAccount, AVAILABLE_MODULES } from "@shared/schema";
+import { type User, type InsertUser, type UpdateUser, type Company, type InsertCompany, type UpdateCompany, type Opportunity, type InsertOpportunity, type UpdateOpportunity, type Activity, type InsertActivity, type OpportunityWithRelations, type CompanyWithRelations, type ActivityWithRelations, type Module, type InsertModule, type BusinessAccount, type InsertBusinessAccount, type BusinessAccountModule, type InsertBusinessAccountModule, type ModuleWithStatus, type BusinessAccountWithRelations, type UserWithBusinessAccount, type Plan, type InsertPlan, type Product, type InsertProduct, type PlanModule, type InsertPlanModule, type BusinessAccountPlan, type InsertBusinessAccountPlan, type BusinessAccountProduct, type InsertBusinessAccountProduct, type PlanUsage, type InsertPlanUsage, type PlanWithModules, type BusinessAccountPlanWithRelations, AVAILABLE_MODULES } from "@shared/schema";
 import { pool } from "./db";
 import { randomUUID } from "crypto";
 
@@ -49,6 +49,47 @@ export interface IStorage {
   enableModuleForBusinessAccount(businessAccountId: string, moduleId: string, enabledBy: string): Promise<boolean>;
   disableModuleForBusinessAccount(businessAccountId: string, moduleId: string): Promise<boolean>;
   hasModuleEnabled(businessAccountId: string, moduleType: string): Promise<boolean>;
+
+  // SaaS Plans Management
+  getPlans(): Promise<Plan[]>;
+  getPlan(id: string): Promise<Plan | undefined>;
+  createPlan(plan: InsertPlan): Promise<Plan>;
+  updatePlan(id: string, plan: Partial<InsertPlan>): Promise<Plan | undefined>;
+  isPlanInUse(planId: string): Promise<{ inUse: boolean; count: number; companies: string[] }>;
+  deletePlan(id: string): Promise<boolean>;
+
+  // Products Management
+  getProducts(): Promise<Product[]>;
+  getProduct(id: string): Promise<Product | undefined>;
+  createProduct(product: InsertProduct): Promise<Product>;
+  updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined>;
+  isProductInUse(productId: string): Promise<{ inUse: boolean; count: number; companies: string[] }>;
+  deleteProduct(id: string): Promise<boolean>;
+
+  // Plan Modules Management
+  getPlanModules(planId: string): Promise<PlanModule[]>;
+  createPlanModule(planModule: InsertPlanModule): Promise<PlanModule>;
+  updatePlanModule(id: string, planModule: Partial<InsertPlanModule>): Promise<PlanModule | undefined>;
+  deletePlanModule(id: string): Promise<boolean>;
+
+  // Business Account Subscriptions
+  getBusinessAccountPlan(businessAccountId: string): Promise<BusinessAccountPlanWithRelations | undefined>;
+  createBusinessAccountPlan(subscription: InsertBusinessAccountPlan): Promise<BusinessAccountPlan>;
+  updateBusinessAccountPlan(id: string, subscription: Partial<InsertBusinessAccountPlan>): Promise<BusinessAccountPlan | undefined>;
+
+  // Business Account Products
+  getBusinessAccountProducts(businessAccountId: string): Promise<BusinessAccountProduct[]>;
+  createBusinessAccountProduct(product: InsertBusinessAccountProduct): Promise<BusinessAccountProduct>;
+  updateBusinessAccountProduct(id: string, product: Partial<InsertBusinessAccountProduct>): Promise<BusinessAccountProduct | undefined>;
+  deleteBusinessAccountProduct(id: string): Promise<boolean>;
+  updateBusinessAccountProductPrices(productId: string, priceUpdate: { unitPrice: string; billingFrequency: string }): Promise<boolean>;
+  updateBusinessAccountProductDualPrices(productId: string, priceUpdate: { monthlyPrice?: string; annualPrice?: string }): Promise<boolean>;
+  updateBusinessAccountPlanDualPrices(planId: string, priceUpdate: { monthlyPrice?: string; annualPrice?: string }): Promise<boolean>;
+
+  // Plan Usage Tracking
+  getPlanUsage(businessAccountId: string): Promise<PlanUsage[]>;
+  updatePlanUsage(usage: InsertPlanUsage): Promise<PlanUsage>;
+  getCurrentUsageCount(businessAccountId: string, moduleType: string): Promise<number>;
 
   // Legacy methods for backward compatibility (will be removed)
   getCompanyModules(companyId: string): Promise<ModuleWithStatus[]>;
@@ -102,6 +143,7 @@ export class MemStorage implements IStorage {
       phone: "+52 555 000 0000",
       password: process.env.SUPER_ADMIN_PASSWORD || "CHANGE_THIS_PASSWORD", // Should be hashed in real implementation
       role: "SUPER_ADMIN",
+      avatar: null,
       businessAccountId: null, // Super admin doesn't belong to any business account
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -117,6 +159,8 @@ export class MemStorage implements IStorage {
       accountsArray.map(async account => ({
         ...account,
         contactEmail: null, // Add missing property
+        contactName: null, // Add missing property
+        contactPhone: null, // Add missing property
         modules: await this.getBusinessAccountModules(account.id),
         users: Array.from(this.users.values()).filter(user => user.businessAccountId === account.id),
         companies: Array.from(this.companies.values()).filter(company => company.businessAccountId === account.id),
@@ -146,6 +190,7 @@ export class MemStorage implements IStorage {
       ...accountData,
       plan: accountData.plan || 'BUSINESS_PLAN',
       isActive: accountData.isActive ?? true,
+      deletedAt: accountData.deletedAt || null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -185,6 +230,7 @@ export class MemStorage implements IStorage {
       ...userData,
       role: userData.role || 'USER',
       phone: userData.phone || null,
+      avatar: userData.avatar || null,
       businessAccountId: userData.businessAccountId || null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -840,6 +886,7 @@ export class DatabaseStorage implements IStorage {
         name: row.name,
         plan: row.plan,
         isActive: row.is_active,
+        deletedAt: row.deleted_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       };
@@ -886,6 +933,7 @@ export class DatabaseStorage implements IStorage {
       phone: row.phone,
       password: row.password,
       role: row.role,
+      avatar: row.avatar,
       businessAccountId: row.business_account_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -954,6 +1002,7 @@ export class DatabaseStorage implements IStorage {
       phone: row.phone,
       password: row.password,
       role: row.role,
+      avatar: row.avatar,
       businessAccountId: row.business_account_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -1501,6 +1550,649 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Failed to initialize database:", error);
     }
+  }
+
+  // SaaS Plans Management
+  async getPlans(): Promise<Plan[]> {
+    const query = `
+      SELECT * FROM plans 
+      ORDER BY display_order ASC, name ASC
+    `;
+    const result = await pool.query(query);
+    return result.rows.map(row => this.mapPlanFromDB(row));
+  }
+
+  async getPlan(id: string): Promise<Plan | undefined> {
+    const query = `SELECT * FROM plans WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return result.rows[0] ? this.mapPlanFromDB(result.rows[0]) : undefined;
+  }
+
+  async createPlan(plan: InsertPlan): Promise<Plan> {
+    const query = `
+      INSERT INTO plans (name, description, price, monthly_price, annual_price, billing_frequency, trial_days, status, is_default, is_active, display_order, features)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `;
+    const values = [
+      plan.name, plan.description, plan.price, plan.monthlyPrice, plan.annualPrice,
+      plan.billingFrequency, plan.trialDays, plan.status, plan.isDefault, 
+      plan.isActive, plan.displayOrder, plan.features
+    ];
+    const result = await pool.query(query, values);
+    return this.mapPlanFromDB(result.rows[0]);
+  }
+
+  async updatePlan(id: string, plan: Partial<InsertPlan>): Promise<Plan | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    // Map camelCase to snake_case for specific fields
+    const planFieldMapping: Record<string, string> = {
+      monthlyPrice: 'monthly_price',
+      annualPrice: 'annual_price',
+      billingFrequency: 'billing_frequency',
+      trialDays: 'trial_days',
+      isDefault: 'is_default',
+      isActive: 'is_active',
+      displayOrder: 'display_order',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at'
+      // Note: status, name, description, price, features don't need mapping
+    };
+
+    Object.entries(plan).forEach(([key, value]) => {
+      if (value !== undefined) {
+        const dbField = planFieldMapping[key] || key;
+        fields.push(`${dbField} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) return this.getPlan(id);
+
+    const query = `
+      UPDATE plans 
+      SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+    values.push(id);
+    
+    const result = await pool.query(query, values);
+    return result.rows[0] ? this.mapPlanFromDB(result.rows[0]) : undefined;
+  }
+
+  async isPlanInUse(planId: string): Promise<{ inUse: boolean; count: number; companies: string[] }> {
+    const query = `
+      SELECT ba.name 
+      FROM business_accounts ba 
+      WHERE ba.plan_id = $1
+    `;
+    const result = await pool.query(query, [planId]);
+    const companies = result.rows.map(row => row.name);
+    
+    return {
+      inUse: result.rows.length > 0,
+      count: result.rows.length,
+      companies
+    };
+  }
+
+  async deletePlan(id: string): Promise<boolean> {
+    // Check if plan is in use before deletion
+    const usage = await this.isPlanInUse(id);
+    if (usage.inUse) {
+      throw new Error(`No se puede eliminar el plan porque está siendo usado por ${usage.count} empresa(s): ${usage.companies.join(', ')}`);
+    }
+    
+    const query = `DELETE FROM plans WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // Products Management
+  // Helper function to map database fields to TypeScript camelCase
+  private mapProductFromDB(row: any): Product {
+    return {
+      ...row,
+      isActive: row.is_active,
+      moduleType: row.module_type,
+      billingFrequency: row.billing_frequency,
+      monthlyPrice: row.monthly_price,
+      annualPrice: row.annual_price,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  // Helper function to map plan database fields to TypeScript camelCase
+  private mapPlanFromDB(row: any): Plan {
+    return {
+      ...row,
+      isActive: row.is_active,
+      isDefault: row.is_default,
+      status: row.status,
+      billingFrequency: row.billing_frequency,
+      monthlyPrice: row.monthly_price,
+      annualPrice: row.annual_price,
+      trialDays: row.trial_days,
+      displayOrder: row.display_order,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  async getProducts(): Promise<Product[]> {
+    const query = `SELECT * FROM products ORDER BY name ASC`;
+    const result = await pool.query(query);
+    return result.rows.map(row => this.mapProductFromDB(row));
+  }
+
+  async getProduct(id: string): Promise<Product | undefined> {
+    const query = `SELECT * FROM products WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return result.rows[0] ? this.mapProductFromDB(result.rows[0]) : undefined;
+  }
+
+  async createProduct(product: InsertProduct): Promise<Product> {
+    const query = `
+      INSERT INTO products (name, description, type, price, billing_frequency, module_type, is_active, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `;
+    const values = [
+      product.name, product.description, product.type, product.price,
+      product.billingFrequency, product.moduleType, product.isActive, product.metadata
+    ];
+    const result = await pool.query(query, values);
+    return this.mapProductFromDB(result.rows[0]);
+  }
+
+  async updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    // Map camelCase to snake_case for specific fields
+    const fieldMapping: Record<string, string> = {
+      monthlyPrice: 'monthly_price',
+      annualPrice: 'annual_price',
+      billingFrequency: 'billing_frequency',
+      moduleType: 'module_type',
+      isActive: 'is_active',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at'
+    };
+
+    Object.entries(product).forEach(([key, value]) => {
+      if (value !== undefined) {
+        const dbField = fieldMapping[key] || key;
+        fields.push(`${dbField} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) return this.getProduct(id);
+
+    const query = `
+      UPDATE products 
+      SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+    values.push(id);
+    
+    const result = await pool.query(query, values);
+    return result.rows[0] ? this.mapProductFromDB(result.rows[0]) : undefined;
+  }
+
+  async isProductInUse(productId: string): Promise<{ inUse: boolean; count: number; companies: string[] }> {
+    const query = `
+      SELECT DISTINCT ba.name 
+      FROM business_account_products bap
+      INNER JOIN business_accounts ba ON bap.business_account_id = ba.id
+      WHERE bap.product_id = $1
+    `;
+    const result = await pool.query(query, [productId]);
+    const companies = result.rows.map(row => row.name);
+    
+    return {
+      inUse: result.rows.length > 0,
+      count: result.rows.length,
+      companies
+    };
+  }
+
+  async deleteProduct(id: string): Promise<boolean> {
+    // Check if product is in use before deletion
+    const usage = await this.isProductInUse(id);
+    if (usage.inUse) {
+      throw new Error(`No se puede eliminar el producto porque está siendo usado por ${usage.count} empresa(s): ${usage.companies.join(', ')}`);
+    }
+    
+    const query = `DELETE FROM products WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // Plan Modules Management
+  async getPlanModules(planId: string): Promise<PlanModule[]> {
+    const query = `SELECT * FROM plan_modules WHERE plan_id = $1`;
+    const result = await pool.query(query, [planId]);
+    return result.rows;
+  }
+
+  async createPlanModule(planModule: InsertPlanModule): Promise<PlanModule> {
+    const query = `
+      INSERT INTO plan_modules (plan_id, module_type, is_included, item_limit, can_create, can_edit, can_delete, features)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `;
+    const values = [
+      planModule.planId, planModule.moduleType, planModule.isIncluded, planModule.itemLimit,
+      planModule.canCreate, planModule.canEdit, planModule.canDelete, planModule.features
+    ];
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async updatePlanModule(id: string, planModule: Partial<InsertPlanModule>): Promise<PlanModule | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    Object.entries(planModule).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) {
+      const query = `SELECT * FROM plan_modules WHERE id = $1`;
+      const result = await pool.query(query, [id]);
+      return result.rows[0];
+    }
+
+    const query = `
+      UPDATE plan_modules 
+      SET ${fields.join(', ')}
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+    values.push(id);
+    
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async deletePlanModule(id: string): Promise<boolean> {
+    const query = `DELETE FROM plan_modules WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  // Business Account Subscriptions
+  async getBusinessAccountPlan(businessAccountId: string): Promise<BusinessAccountPlanWithRelations | undefined> {
+    const query = `
+      SELECT 
+        bap.*,
+        p.*,
+        pm.id as pm_id, pm.module_type, pm.is_included, pm.item_limit, pm.can_create, pm.can_edit, pm.can_delete, pm.features as pm_features
+      FROM business_account_plans bap
+      INNER JOIN plans p ON bap.plan_id = p.id
+      LEFT JOIN plan_modules pm ON p.id = pm.plan_id
+      WHERE bap.business_account_id = $1 
+        AND bap.status IN ('TRIAL', 'ACTIVE')
+      ORDER BY bap.created_at DESC
+      LIMIT 1
+    `;
+    const result = await pool.query(query, [businessAccountId]);
+    
+    if (result.rows.length === 0) return undefined;
+
+    const firstRow = result.rows[0];
+    const plan = {
+      id: firstRow.id,
+      name: firstRow.name,
+      description: firstRow.description,
+      price: firstRow.price,
+      monthlyPrice: firstRow.monthly_price,
+      annualPrice: firstRow.annual_price,
+      billingFrequency: firstRow.billing_frequency,
+      trialDays: firstRow.trial_days,
+      status: firstRow.status,
+      isActive: firstRow.is_active,
+      isDefault: firstRow.is_default,
+      displayOrder: firstRow.display_order,
+      features: firstRow.features,
+      createdAt: firstRow.created_at,
+      updatedAt: firstRow.updated_at
+    };
+
+    const modules = result.rows
+      .filter(row => row.pm_id)
+      .map(row => ({
+        id: row.pm_id,
+        planId: row.plan_id,
+        moduleType: row.module_type,
+        isIncluded: row.is_included,
+        itemLimit: row.item_limit,
+        canCreate: row.can_create,
+        canEdit: row.can_edit,
+        canDelete: row.can_delete,
+        features: row.pm_features
+      }));
+
+    return {
+      id: firstRow.id,
+      businessAccountId: firstRow.business_account_id,
+      planId: firstRow.plan_id,
+      status: firstRow.status,
+      trialStartDate: firstRow.trial_start_date,
+      trialEndDate: firstRow.trial_end_date,
+      subscriptionStartDate: firstRow.subscription_start_date,
+      subscriptionEndDate: firstRow.subscription_end_date,
+      autoRenew: firstRow.auto_renew,
+      billingFrequency: firstRow.billing_frequency,
+      totalAmount: firstRow.total_amount,
+      currency: firstRow.currency,
+      createdAt: firstRow.created_at,
+      updatedAt: firstRow.updated_at,
+      plan: { ...plan, modules },
+      businessAccount: {
+        id: firstRow.business_account_id,
+        name: '',
+        plan: '',
+        isActive: true,
+        deletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } // Will be loaded separately if needed
+    };
+  }
+
+  async createBusinessAccountPlan(subscription: InsertBusinessAccountPlan): Promise<BusinessAccountPlan> {
+    const query = `
+      INSERT INTO business_account_plans 
+      (business_account_id, plan_id, status, trial_start_date, trial_end_date, subscription_start_date, 
+       subscription_end_date, auto_renew, billing_frequency, total_amount, currency)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+    `;
+    const values = [
+      subscription.businessAccountId, subscription.planId, subscription.status,
+      subscription.trialStartDate, subscription.trialEndDate, subscription.subscriptionStartDate,
+      subscription.subscriptionEndDate, subscription.autoRenew, subscription.billingFrequency,
+      subscription.totalAmount, subscription.currency
+    ];
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async updateBusinessAccountPlan(id: string, subscription: Partial<InsertBusinessAccountPlan>): Promise<BusinessAccountPlan | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    Object.entries(subscription).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) {
+      const query = `SELECT * FROM business_account_plans WHERE id = $1`;
+      const result = await pool.query(query, [id]);
+      return result.rows[0];
+    }
+
+    const query = `
+      UPDATE business_account_plans 
+      SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+    values.push(id);
+    
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  // Business Account Products
+  async getBusinessAccountProducts(businessAccountId: string): Promise<BusinessAccountProduct[]> {
+    const query = `
+      SELECT bap.*, p.*
+      FROM business_account_products bap
+      INNER JOIN products p ON bap.product_id = p.id
+      WHERE bap.business_account_id = $1 AND bap.status = 'ACTIVE'
+      ORDER BY bap.created_at DESC
+    `;
+    const result = await pool.query(query, [businessAccountId]);
+    return result.rows;
+  }
+
+  async createBusinessAccountProduct(product: InsertBusinessAccountProduct): Promise<BusinessAccountProduct> {
+    const query = `
+      INSERT INTO business_account_products 
+      (business_account_id, product_id, quantity, status, subscription_start_date, subscription_end_date,
+       unit_price, total_amount, billing_frequency, auto_renew)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `;
+    const values = [
+      product.businessAccountId, product.productId, product.quantity, product.status,
+      product.subscriptionStartDate, product.subscriptionEndDate, product.unitPrice,
+      product.totalAmount, product.billingFrequency, product.autoRenew
+    ];
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async updateBusinessAccountProduct(id: string, product: Partial<InsertBusinessAccountProduct>): Promise<BusinessAccountProduct | undefined> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramCount = 1;
+
+    Object.entries(product).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    });
+
+    if (fields.length === 0) {
+      const query = `SELECT * FROM business_account_products WHERE id = $1`;
+      const result = await pool.query(query, [id]);
+      return result.rows[0];
+    }
+
+    const query = `
+      UPDATE business_account_products 
+      SET ${fields.join(', ')}, updated_at = NOW()
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+    values.push(id);
+    
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async deleteBusinessAccountProduct(id: string): Promise<boolean> {
+    const query = `DELETE FROM business_account_products WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  async updateBusinessAccountProductPrices(productId: string, priceUpdate: { unitPrice: string; billingFrequency: string }): Promise<boolean> {
+    const { unitPrice, billingFrequency } = priceUpdate;
+    
+    // Calculate new total amounts based on quantity
+    const query = `
+      UPDATE business_account_products 
+      SET 
+        unit_price = $1,
+        billing_frequency = $2,
+        total_amount = (CAST($1 AS DECIMAL) * quantity)::TEXT,
+        updated_at = NOW()
+      WHERE product_id = $3
+      RETURNING id
+    `;
+    
+    try {
+      const result = await pool.query(query, [unitPrice, billingFrequency, productId]);
+      console.log(`Updated ${result.rowCount} customer subscriptions for product ${productId}`);
+      return (result.rowCount || 0) > 0;
+    } catch (error) {
+      console.error("Error updating business account product prices:", error);
+      return false;
+    }
+  }
+
+  async updateBusinessAccountProductDualPrices(productId: string, priceUpdate: { monthlyPrice?: string; annualPrice?: string }): Promise<boolean> {
+    const { monthlyPrice, annualPrice } = priceUpdate;
+    
+    try {
+      let totalUpdated = 0;
+
+      // Update monthly subscriptions if monthlyPrice is provided
+      if (monthlyPrice) {
+        const monthlyQuery = `
+          UPDATE business_account_products 
+          SET 
+            unit_price = $1,
+            total_amount = (CAST($1 AS DECIMAL) * quantity)::TEXT,
+            updated_at = NOW()
+          WHERE product_id = $2 AND billing_frequency = 'MONTHLY'
+          RETURNING id
+        `;
+        
+        const monthlyResult = await pool.query(monthlyQuery, [monthlyPrice, productId]);
+        totalUpdated += (monthlyResult.rowCount || 0);
+        console.log(`Updated ${(monthlyResult.rowCount || 0)} monthly subscriptions for product ${productId}`);
+      }
+
+      // Update annual subscriptions if annualPrice is provided
+      if (annualPrice) {
+        const annualQuery = `
+          UPDATE business_account_products 
+          SET 
+            unit_price = $1,
+            total_amount = (CAST($1 AS DECIMAL) * quantity)::TEXT,
+            updated_at = NOW()
+          WHERE product_id = $2 AND billing_frequency = 'ANNUAL'
+          RETURNING id
+        `;
+        
+        const annualResult = await pool.query(annualQuery, [annualPrice, productId]);
+        totalUpdated += (annualResult.rowCount || 0);
+        console.log(`Updated ${(annualResult.rowCount || 0)} annual subscriptions for product ${productId}`);
+      }
+
+      console.log(`Total updated customer subscriptions: ${totalUpdated} for product ${productId}`);
+      return totalUpdated > 0;
+    } catch (error) {
+      console.error("Error updating business account product dual prices:", error);
+      return false;
+    }
+  }
+
+  async updateBusinessAccountPlanDualPrices(planId: string, priceUpdate: { monthlyPrice?: string; annualPrice?: string }): Promise<boolean> {
+    const { monthlyPrice, annualPrice } = priceUpdate;
+    
+    try {
+      let totalUpdated = 0;
+
+      // Update monthly plan subscriptions if monthlyPrice is provided
+      if (monthlyPrice) {
+        const monthlyQuery = `
+          UPDATE business_accounts 
+          SET 
+            plan_price = $1,
+            updated_at = NOW()
+          WHERE plan_id = $2 AND plan_billing_frequency = 'MONTHLY'
+          RETURNING id
+        `;
+        
+        const monthlyResult = await pool.query(monthlyQuery, [monthlyPrice, planId]);
+        totalUpdated += (monthlyResult.rowCount || 0);
+        console.log(`Updated ${(monthlyResult.rowCount || 0)} monthly plan subscriptions for plan ${planId}`);
+      }
+
+      // Update annual plan subscriptions if annualPrice is provided
+      if (annualPrice) {
+        const annualQuery = `
+          UPDATE business_accounts 
+          SET 
+            plan_price = $1,
+            updated_at = NOW()
+          WHERE plan_id = $2 AND plan_billing_frequency = 'ANNUAL'
+          RETURNING id
+        `;
+        
+        const annualResult = await pool.query(annualQuery, [annualPrice, planId]);
+        totalUpdated += (annualResult.rowCount || 0);
+        console.log(`Updated ${(annualResult.rowCount || 0)} annual plan subscriptions for plan ${planId}`);
+      }
+
+      console.log(`Total updated customer plan subscriptions: ${totalUpdated} for plan ${planId}`);
+      return totalUpdated > 0;
+    } catch (error) {
+      console.error("Error updating business account plan dual prices:", error);
+      return false;
+    }
+  }
+
+  // Plan Usage Tracking
+  async getPlanUsage(businessAccountId: string): Promise<PlanUsage[]> {
+    const query = `SELECT * FROM plan_usage WHERE business_account_id = $1`;
+    const result = await pool.query(query, [businessAccountId]);
+    return result.rows;
+  }
+
+  async updatePlanUsage(usage: InsertPlanUsage): Promise<PlanUsage> {
+    const query = `
+      INSERT INTO plan_usage (business_account_id, module_type, current_count)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (business_account_id, module_type) 
+      DO UPDATE SET 
+        current_count = $3,
+        last_calculated = NOW()
+      RETURNING *
+    `;
+    const values = [usage.businessAccountId, usage.moduleType, usage.currentCount];
+    const result = await pool.query(query, values);
+    return result.rows[0];
+  }
+
+  async getCurrentUsageCount(businessAccountId: string, moduleType: string): Promise<number> {
+    let query = '';
+    
+    switch (moduleType) {
+      case 'USERS':
+        query = `SELECT COUNT(*) as count FROM users WHERE business_account_id = $1`;
+        break;
+      case 'COMPANIES':
+        query = `SELECT COUNT(*) as count FROM companies WHERE business_account_id = $1`;
+        break;
+      case 'CRM':
+        // For CRM, we don't count items, just check access
+        return 0;
+      default:
+        return 0;
+    }
+
+    const result = await pool.query(query, [businessAccountId]);
+    return parseInt(result.rows[0].count) || 0;
   }
 }
 

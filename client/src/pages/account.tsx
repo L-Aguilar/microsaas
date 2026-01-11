@@ -282,7 +282,7 @@ export default function AccountSettings() {
                       id="role"
                       value={user?.role === 'BUSINESS_PLAN' ? 'Plan de Negocio' : 
                             user?.role === 'USER' ? 'Usuario' : 
-                            user?.role === 'ADMIN' ? 'Administrador' : 
+                            user?.role === 'SUPER_ADMIN' ? 'Super Administrador' : 
                             user?.role || "No especificado"}
                       disabled
                       className="bg-muted"

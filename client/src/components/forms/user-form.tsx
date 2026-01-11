@@ -23,10 +23,11 @@ type UserFormData = z.infer<typeof userFormSchema>;
 
 interface UserFormProps {
   user?: User | null;
-  onClose: () => void;
+  onClose?: () => void;
+  onCancel?: () => void;
 }
 
-export default function UserForm({ user, onClose, businessAccountId, onSuccess }: UserFormProps & { businessAccountId?: string; onSuccess?: () => void }) {
+export default function UserForm({ user, onClose, onCancel, businessAccountId, onSuccess }: UserFormProps & { businessAccountId?: string; onSuccess?: () => void }) {
   const [countryCode, setCountryCode] = useState(user?.phone?.substring(0, 3) || "+52");
   const [phoneNumber, setPhoneNumber] = useState(user?.phone?.substring(3) || "");
   const queryClient = useQueryClient();
@@ -87,7 +88,7 @@ export default function UserForm({ user, onClose, businessAccountId, onSuccess }
       });
       if (onSuccess) {
         onSuccess();
-      } else {
+      } else if (onClose) {
         onClose();
       }
       form.reset();
@@ -127,7 +128,7 @@ export default function UserForm({ user, onClose, businessAccountId, onSuccess }
       });
       if (onSuccess) {
         onSuccess();
-      } else {
+      } else if (onClose) {
         onClose();
       }
     },

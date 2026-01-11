@@ -1,4 +1,4 @@
--- Script para configurar Shimli Admin en Supabase
+-- Script para configurar Controly en Supabase
 -- Ejecutar este script completo en el SQL Editor de Supabase
 
 -- Crear tablas principales

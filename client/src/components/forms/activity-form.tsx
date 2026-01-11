@@ -119,7 +119,6 @@ export default function ActivityForm({ opportunityId, onSuccess, onCancel }: Act
             <SelectContent>
               <SelectItem value="CALL">Llamada</SelectItem>
               <SelectItem value="MEETING">Reunión</SelectItem>
-              <SelectItem value="AGREEMENT">Acuerdo</SelectItem>
               <SelectItem value="NOTE">Nota</SelectItem>
             </SelectContent>
           </Select>

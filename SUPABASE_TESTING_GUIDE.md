@@ -1,4 +1,4 @@
-# 🚀 Guía de Validación de Supabase - BizFlowCRM
+# 🚀 Guía de Validación de Supabase - Controly
 
 Esta guía te ayudará a validar que todos los endpoints CRUD funcionen correctamente con Supabase.
 

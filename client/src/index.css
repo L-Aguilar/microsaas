@@ -74,26 +74,6 @@
   --brand-700: #000000;
 }
 
-/* Shimli theme configuration */
-.shimli-theme {
-  /* Main colors with Shimli purple */
-  --primary: #7e02c6;
-  --primary-foreground: #ffffff;
-  --ring: #7e02c6;
-  
-  /* Sidebar with Shimli purple */
-  --sidebar-primary: #7e02c6;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-ring: #7e02c6;
-  
-  /* Brand colors with Shimli purple */
-  --brand-primary: #7e02c6;
-  --brand-50: #faf5ff;
-  --brand-100: #f3e8ff;
-  --brand-500: #7e02c6;
-  --brand-600: #6b02a6;
-  --brand-700: #580286;
-}
 
 .dark {
   /* Dark mode - keeping minimal and professional */
@@ -151,24 +131,6 @@
   --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
-/* Shimli theme for dark mode */
-.dark.shimli-theme {
-  /* Dark mode with Shimli purple */
-  --primary: #9d4edd;
-  --primary-foreground: #ffffff;
-  --ring: #9d4edd;
-  
-  /* Sidebar with Shimli purple in dark mode */
-  --sidebar-primary: #9d4edd;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-ring: #9d4edd;
-  
-  /* Brand colors with Shimli purple in dark mode */
-  --brand-primary: #9d4edd;
-  --brand-500: #9d4edd;
-  --brand-600: #7e02c6;
-  --brand-700: #6b02a6;
-}
 
 @layer base {
   * {
@@ -284,6 +246,12 @@
   .status-won { @apply bg-green-100 text-green-800; }
   .status-lost { @apply bg-red-100 text-red-800; }
   .status-on-hold { @apply bg-gray-100 text-gray-800; }
+
+  /* Custom switch styles for unchecked state */
+  [role="switch"][data-state="unchecked"] {
+    background-color: #cecece !important;
+    border: solid 1px #a7a7a7 !important;
+  }
 
   /* Rich Text Editor Styles */
   .ProseMirror {

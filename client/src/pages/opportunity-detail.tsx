@@ -68,23 +68,19 @@ export default function OpportunityDetail({ opportunityId }: OpportunityDetailPr
   }
 
   const statusColors = {
-    NEW: "bg-purple-100 text-purple-800",
-    QUALIFYING: "bg-blue-100 text-blue-800",
-    PROPOSAL: "bg-yellow-100 text-yellow-800",
+    NEW: "bg-blue-100 text-blue-800",
+    IN_PROGRESS: "bg-purple-100 text-purple-800",
     NEGOTIATION: "bg-orange-100 text-orange-800",
     WON: "bg-green-100 text-green-800",
     LOST: "bg-red-100 text-red-800",
-    ON_HOLD: "bg-gray-100 text-gray-800",
   };
 
   const statusLabels = {
     NEW: "Nueva",
-    QUALIFYING: "Calificación",
-    PROPOSAL: "Propuesta",
+    IN_PROGRESS: "En Proceso",
     NEGOTIATION: "Negociación",
     WON: "Ganada",
     LOST: "Perdida",
-    ON_HOLD: "En Espera",
   };
 
   // Sort activities by creation date (most recent first)

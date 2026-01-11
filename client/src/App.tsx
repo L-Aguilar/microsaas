@@ -23,6 +23,7 @@ import BusinessAccountDetail from "@/pages/business-account-detail";
 import AccountSettings from "@/pages/account";
 import PasswordRecovery from "@/pages/password-recovery";
 import RemindersDashboard from "@/pages/reminders";
+import PlanManagement from "@/pages/plan-management";
 import MainLayout from "@/components/layout/main-layout";
 
 function ProtectedRoute({ children, requiredRole, onNewOpportunity, onNewCompany }: { children: React.ReactNode; requiredRole?: string; onNewOpportunity?: () => void; onNewCompany?: () => void }) {
@@ -144,6 +145,11 @@ function Router() {
           <RemindersDashboard />
         </ProtectedRoute>
       </Route>
+      <Route path="/plan-management">
+        <ProtectedRoute requiredRole="SUPER_ADMIN">
+          <PlanManagement />
+        </ProtectedRoute>
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -151,12 +157,7 @@ function Router() {
 
 function App() {
   useEffect(() => {
-    // Apply theme class to document body
-    if (CURRENT_THEME === 'shimli') {
-      document.body.classList.add('shimli-theme');
-    } else {
-      document.body.classList.remove('shimli-theme');
-    }
+    // No theme classes needed - using default CSS variables
   }, []);
 
   return (

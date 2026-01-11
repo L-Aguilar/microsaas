@@ -8,6 +8,7 @@ import KanbanBoard from "@/components/kanban/kanban-board";
 import ActivityTimeline from "@/components/activity/activity-timeline";
 import OpportunityForm from "@/components/forms/opportunity-form";
 import CompanyForm from "@/components/forms/company-form";
+import AlertsPanel from "@/components/alerts/alerts-panel";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { OpportunityWithRelations, CompanyWithRelations, DashboardStats } from "@shared/schema";
 
@@ -253,6 +254,9 @@ export default function Dashboard({
         ) : (
           /* Regular users: CRM Dashboard */
           <div>
+            {/* Alerts Panel */}
+            <AlertsPanel />
+
             {/* Kanban Board */}
             <KanbanBoard opportunities={opportunities} />
 

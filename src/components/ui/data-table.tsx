@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronUp, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search, Filter, ChevronLeft, ChevronRight, Edit, Trash2 } from 'lucide-react';
 import { Button } from './button';
 import { Input } from './input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
@@ -57,6 +57,9 @@ export interface DataTableProps<T> {
   onRowClick?: (item: T) => void;
   className?: string;
   pageSizeOptions?: number[];
+  loading?: boolean;
+  onEdit?: (item: T) => void;
+  onDelete?: (item: T) => void;
 }
 
 export function DataTable<T extends { id: string }>({
@@ -66,7 +69,10 @@ export function DataTable<T extends { id: string }>({
   itemsPerPage = 10,
   onRowClick,
   className = "",
-  pageSizeOptions = [10, 25]
+  pageSizeOptions = [10, 25],
+  loading = false,
+  onEdit,
+  onDelete
 }: DataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -81,11 +87,52 @@ export function DataTable<T extends { id: string }>({
     setCurrentPage(1); // Reset a la primera página
   }, [itemsPerPage]);
 
-  // Filtrar datos
+  // Agregar columna de acciones si onEdit o onDelete están presentes
+  const columnsWithActions = useMemo(() => {
+    if (!onEdit && !onDelete) {
+      return columns;
+    }
+
+    const actionsColumn: Column<T> = {
+      key: 'actions',
+      header: 'Acciones',
+      accessor: () => '',
+      render: (_, item) => (
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onEdit(item)}
+              className="h-8 w-8 p-0"
+              title="Editar"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(item)}
+              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+              title="Eliminar"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      ),
+    };
+
+    return [...columns, actionsColumn];
+  }, [columns, onEdit, onDelete]);
+
+  // Filtrar datos (solo usar columnas originales, excluir columna de acciones)
   const filteredData = useMemo(() => {
     let filtered = data;
 
-    // Aplicar búsqueda global
+    // Aplicar búsqueda global (excluir columna de acciones)
     if (searchTerm) {
       filtered = filtered.filter(item =>
         columns.some(column => {
@@ -111,11 +158,11 @@ export function DataTable<T extends { id: string }>({
     return filtered;
   }, [data, searchTerm, filters, columns]);
 
-  // Ordenar datos
+  // Ordenar datos (puede usar columnsWithActions para ordenar por columna de acciones)
   const sortedData = useMemo(() => {
     if (!sortColumn) return filteredData;
 
-    const column = columns.find(col => col.key === sortColumn);
+    const column = columnsWithActions.find(col => col.key === sortColumn);
     if (!column) return filteredData;
 
     return [...filteredData].sort((a, b) => {
@@ -136,7 +183,7 @@ export function DataTable<T extends { id: string }>({
 
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [filteredData, sortColumn, sortDirection, columns]);
+  }, [filteredData, sortColumn, sortDirection, columnsWithActions]);
 
   // Paginación
   const totalPages = Math.ceil(sortedData.length / pageSize);
@@ -232,15 +279,15 @@ export function DataTable<T extends { id: string }>({
           <table className="w-full">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {columns.map((column) => (
+                {columnsWithActions.map((column) => (
                   <th
                     key={column.key}
                     className={`px-4 py-3 text-left text-sm font-medium text-gray-700 ${
                       column.sortable ? 'cursor-pointer hover:bg-gray-100' : ''
-                    } ${column.width || ''}`}
+                    } ${column.width || ''} ${column.key === 'actions' ? 'text-right' : ''}`}
                     onClick={() => column.sortable && handleSort(column.key)}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-2 ${column.key === 'actions' ? 'justify-end' : ''}`}>
                       <span>{column.header}</span>
                       {column.sortable && (
                         <div className="flex flex-col">
@@ -258,7 +305,16 @@ export function DataTable<T extends { id: string }>({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {paginatedData.length > 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={columnsWithActions.length} className="px-4 py-8 text-center text-gray-500">
+                    <div className="flex flex-col items-center space-y-2">
+                      <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                      <p>Cargando datos...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedData.length > 0 ? (
                 paginatedData.map((item, index) => (
                   <tr
                     key={item.id}
@@ -267,8 +323,11 @@ export function DataTable<T extends { id: string }>({
                     }`}
                     onClick={() => onRowClick?.(item)}
                   >
-                    {columns.map((column) => (
-                      <td key={column.key} className="px-4 py-3 text-sm text-gray-900">
+                    {columnsWithActions.map((column) => (
+                      <td 
+                        key={column.key} 
+                        className={`px-4 py-3 text-sm text-gray-900 ${column.key === 'actions' ? 'text-right' : ''}`}
+                      >
                         {renderHtmlSafely(
                           column.render
                             ? column.render(column.accessor(item), item)
@@ -283,9 +342,8 @@ export function DataTable<T extends { id: string }>({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={columns.length} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={columnsWithActions.length} className="px-4 py-8 text-center text-gray-500">
                     <div className="flex flex-col items-center space-y-2">
-                      <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
                       <p>No hay datos para mostrar</p>
                       <p className="text-xs text-gray-400">Verifica que estés autenticado y que haya datos disponibles</p>
                     </div>

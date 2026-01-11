@@ -241,9 +241,10 @@ export default function OpportunityForm({ opportunity, onSuccess, onCancel }: Op
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="NEW">Nuevo</SelectItem>
-                <SelectItem value="QUALIFYING">Calificación</SelectItem>
-                <SelectItem value="PROPOSAL">Propuesta</SelectItem>
+                <SelectItem value="IN_PROGRESS">En Proceso</SelectItem>
                 <SelectItem value="NEGOTIATION">Negociación</SelectItem>
+                <SelectItem value="WON">Ganada</SelectItem>
+                <SelectItem value="LOST">Perdida</SelectItem>
               </SelectContent>
             </Select>
           </div>

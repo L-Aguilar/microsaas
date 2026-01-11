@@ -33,22 +33,18 @@ export default function CompanyDetail() {
 
   const statusColors = {
     NEW: "bg-blue-100 text-blue-800",
-    QUALIFYING: "bg-yellow-100 text-yellow-800",
-    PROPOSAL: "bg-orange-100 text-orange-800",
-    NEGOTIATION: "bg-purple-100 text-purple-800",
+    IN_PROGRESS: "bg-purple-100 text-purple-800",
+    NEGOTIATION: "bg-orange-100 text-orange-800",
     WON: "bg-green-100 text-green-800",
     LOST: "bg-red-100 text-red-800",
-    ON_HOLD: "bg-gray-100 text-gray-800",
   };
 
   const statusLabels = {
     NEW: "Nueva",
-    QUALIFYING: "Calificando",
-    PROPOSAL: "Propuesta",
+    IN_PROGRESS: "En Proceso",
     NEGOTIATION: "Negociación",
     WON: "Ganada",
     LOST: "Perdida",
-    ON_HOLD: "En espera",
   };
 
   const companyStatusColors = {
@@ -104,8 +100,8 @@ export default function CompanyDetail() {
       sortable: true,
       width: "w-1/6",
       render: (value) => (
-        <Badge className={statusColors[value]}>
-          {statusLabels[value]}
+        <Badge className={statusColors[value as keyof typeof statusColors]}>
+          {statusLabels[value as keyof typeof statusLabels]}
         </Badge>
       ),
     },

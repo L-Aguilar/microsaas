@@ -15,15 +15,13 @@ interface ActivityItemProps {
 const activityTypeColors = {
   CALL: "bg-blue-100 text-blue-800",
   MEETING: "bg-green-100 text-green-800",
-  AGREEMENT: "bg-purple-100 text-purple-800",
   NOTE: "bg-gray-100 text-gray-800",
 };
 
 const activityTypeLabels = {
-  CALL: "CALL",
-  MEETING: "MEETING",
-  AGREEMENT: "AGREEMENT",
-  NOTE: "NOTE",
+  CALL: "Llamada",
+  MEETING: "Reunión",
+  NOTE: "Nota",
 };
 
 export default function ActivityItem({ 

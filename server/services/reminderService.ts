@@ -99,7 +99,7 @@ export class ReminderService {
     }
     
     // Obtener total de oportunidades abiertas por usuario
-    for (const [userId, userData] of userMap) {
+    for (const [userId, userData] of Array.from(userMap)) {
       const totalQuery = `
         SELECT COUNT(*) as total
         FROM opportunities o
@@ -164,7 +164,7 @@ export class ReminderService {
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Recordatorio de Seguimiento - ShimliAdmin</title>
+        <title>Recordatorio de Seguimiento - Controly</title>
         <style>
           body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
           .container { max-width: 800px; margin: 0 auto; padding: 20px; }
@@ -235,7 +235,7 @@ export class ReminderService {
     `;
     
     const textContent = `
-      Recordatorio de Seguimiento - ShimliAdmin
+      Recordatorio de Seguimiento - Controly
       
       Hola ${userName},
       
@@ -256,7 +256,7 @@ export class ReminderService {
       to: userEmail,
       toName: userName,
       from: process.env.FROM_EMAIL || 'noreply@sheilim.com',
-      fromName: process.env.FROM_NAME || 'ShimliAdmin',
+      fromName: process.env.FROM_NAME || 'Controly',
       subject: `🔔 Recordatorio: ${totalOpenOpportunities} oportunidades requieren seguimiento`,
       htmlContent,
       textContent

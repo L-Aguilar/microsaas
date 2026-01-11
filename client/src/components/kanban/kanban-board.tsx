@@ -11,8 +11,7 @@ interface KanbanBoardProps {
 
 const statusColumns = [
   { id: "NEW", title: "Nuevas", color: "purple" },
-  { id: "QUALIFYING", title: "Calificación", color: "blue" },
-  { id: "PROPOSAL", title: "Propuesta", color: "yellow" },
+  { id: "IN_PROGRESS", title: "En Proceso", color: "blue" },
   { id: "NEGOTIATION", title: "Negociación", color: "orange" },
   { id: "WON", title: "Ganadas", color: "green" },
   { id: "LOST", title: "Perdidas", color: "red" },
