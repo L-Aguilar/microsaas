@@ -2,11 +2,6 @@
   "buildCommand": "npm install --force && npm run build",
   "installCommand": "npm install --force",
   "framework": "vite",
-  "functions": {
-    "app/server/[...path].js": {
-      "runtime": "nodejs18.x"
-    }
-  },
   "rewrites": [
     {
       "source": "/((?!api/).*)",
