@@ -97,7 +97,7 @@ export interface IStorage {
   disableModuleForCompany(companyId: string, moduleId: string): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
+export class MemStorage {
   private users: Map<string, User>;
   private companies: Map<string, Company>;
   private opportunities: Map<string, Opportunity>;
