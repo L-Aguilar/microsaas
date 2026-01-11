@@ -21,7 +21,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "tsc"
+    "check": "tsc",
+    "server": "npx tsx server/index.ts",
+    "start": "npx tsx server/index.ts"
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",
