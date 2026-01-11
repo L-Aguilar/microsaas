@@ -7,3 +7,11 @@ restartPolicyType = "never"
 
 [nixpacks]
 pkgs = ["nodejs-18_x"]
+
+[nixpacks.phases.setup]
+
+[nixpacks.phases.install]
+cmds = ["npm install"]
+
+[nixpacks.phases.build]
+cmds = ["echo 'Skipping build step for backend server'"]

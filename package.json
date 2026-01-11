@@ -19,7 +19,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "echo 'Backend does not require build step'",
     "preview": "vite preview",
     "check": "tsc",
     "server": "npx tsx server/index.ts",
