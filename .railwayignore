@@ -1,9 +1,0 @@
-client/
-vite.config.ts
-index.html
-dist/
-build/
-node_modules/
-*.log
-.env
-.vercel

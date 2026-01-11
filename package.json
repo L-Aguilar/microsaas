@@ -18,10 +18,7 @@
     "url": "https://github.com/tu-usuario/shimliadmin.git"
   },
   "scripts": {
-    "dev": "vite",
     "build": "echo 'Backend does not require build step'",
-    "preview": "vite preview",
-    "check": "tsc",
     "server": "npx tsx server/index.ts",
     "start": "npx tsx server/index.ts"
   },
