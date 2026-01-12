@@ -48,6 +48,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     name: 'bizflow_session_id', // Change default session name for security
   }));
 
+  // Health check route for Railway
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
