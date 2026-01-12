@@ -6,6 +6,7 @@ import ConnectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
 import { insertUserSchema, updateUserSchema, insertCompanySchema, updateCompanySchema, insertOpportunitySchema, updateOpportunitySchema, insertActivitySchema, insertModuleSchema, insertBusinessAccountSchema, insertBusinessAccountModuleSchema, insertPlanSchema, insertProductSchema, insertPlanModuleSchema } from "@shared/schema";
 import { generateSecurePassword, generateAlphanumericPassword, hashPassword, verifyPassword } from "./utils/password";
+import bcrypt from "bcryptjs";
 import { sendWelcomeEmail } from "./utils/email";
 import { sendEmail, sendWelcomeEmail as sendBrevoWelcomeEmail } from "./services/emailService";
 import { ReminderService } from "./services/reminderService";
@@ -305,6 +306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
   // Auth routes (JWT-based, no session middleware needed)
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -321,8 +323,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Verify password using custom hash function
-      const isValidPassword = verifyPassword(password, user.password);
+      // Verify password - support both bcrypt (legacy) and custom hash
+      let isValidPassword = false;
+      if (user.password.startsWith('$2b$')) {
+        // Legacy bcrypt hash
+        isValidPassword = bcrypt.compareSync(password, user.password);
+      } else {
+        // Custom hash function
+        isValidPassword = verifyPassword(password, user.password);
+      }
       
       if (!isValidPassword) {
         // Security audit log for failed login
@@ -368,11 +377,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get current user
-  app.get("/api/auth/user", async (req: any, res) => {
-    if (!req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
+  // Get current user (JWT-protected)
+  app.get("/api/auth/user", requireAuth, async (req, res) => {
     res.json({ ...req.user, password: undefined });
   });
 
@@ -519,36 +525,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  // Middleware for authentication (no role check)
-  const requireAuth = (req: any, res: any, next: any) => {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
-    next();
-  };
-
-  // Middleware for role-based access control
-  const requireRole = (requiredRoles: string | string[]) => {
+  // Using imported JWT middleware instead of local session middleware
+  
+  // Helper function for multiple role support (temporary)
+  const requireAnyRole = (roles: string[]) => {
     return (req: any, res: any, next: any) => {
-      const user = req.user;
-      if (!user) {
+      if (!req.user) {
         return res.status(401).json({ message: "Authentication required" });
       }
-      const roles = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
-      if (!roles.includes(user.role)) {
+      if (!roles.includes(req.user.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       next();
     };
   };
 
-  // Middleware for business account data isolation
-  const requireBusinessAccount = (req: any, res: any, next: any) => {
+  // Middleware for business account data isolation (assumes JWT auth already verified)
+  const requireBusinessAccountWithId = (req: any, res: any, next: any) => {
     const user = req.user;
-    if (!user) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
     
     // SUPER_ADMIN can access all business accounts
     if (user.role === 'SUPER_ADMIN') {
@@ -565,17 +559,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   };
 
-  // Middleware for SUPER_ADMIN only access
-  const requireSuperAdmin = (req: any, res: any, next: any) => {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
-    if (user.role !== 'SUPER_ADMIN') {
-      return res.status(403).json({ message: "Super admin access required" });
-    }
-    next();
-  };
 
   // Middleware to check if business account has module enabled
   const requireModule = (moduleType: string) => {
@@ -603,7 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Get current user's business account modules (for sidebar navigation)
-  app.get("/api/user/business-account/modules", requireBusinessAccount, async (req: any, res) => {
+  app.get("/api/user/business-account/modules", requireAuth, requireBusinessAccountWithId, async (req: any, res) => {
     try {
       if (req.user.role === 'SUPER_ADMIN') {
         // SUPER_ADMIN has access to all modules
@@ -629,7 +612,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Business Accounts routes (SUPER_ADMIN only)
-  app.get("/api/business-accounts", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.get("/api/business-accounts", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const accounts = await storage.getBusinessAccounts();
       res.json(accounts);
@@ -639,7 +622,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.post("/api/business-accounts", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { enabledModules, ...accountData } = req.body;
       const parsedAccountData = insertBusinessAccountSchema.parse(accountData);
@@ -662,7 +645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/business-accounts/:id", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.get("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const account = await storage.getBusinessAccount(req.params.id);
       if (!account) {
@@ -675,7 +658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/business-accounts/:id", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.put("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       // Extract contact fields separately before parsing (these are user fields, not business account fields)
       const { contactEmail, contactName, contactPhone, ...businessAccountFields } = req.body;
@@ -703,7 +686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/business-accounts/:id", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.delete("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const deleted = await storage.deleteBusinessAccount(req.params.id);
       if (deleted) {
@@ -718,7 +701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Business Account Detail (for SUPER_ADMIN)
-  app.get("/api/business-accounts/:id", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.get("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const account = await storage.getBusinessAccount(req.params.id);
       if (!account) {
@@ -732,7 +715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get users for a specific business account (for SUPER_ADMIN)
-  app.get("/api/business-accounts/:id/users", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.get("/api/business-accounts/:id/users", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const users = await storage.getUsers(req.params.id);
       const safeUsers = users.map(user => ({
@@ -747,7 +730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get companies for a specific business account (for SUPER_ADMIN)
-  app.get("/api/business-accounts/:id/companies", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.get("/api/business-accounts/:id/companies", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const companies = await storage.getCompanies(req.params.id);
       res.json(companies);
@@ -758,7 +741,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create user for a specific business account (SUPER_ADMIN)
-  app.post("/api/business-accounts/:id/users", requireRole('SUPER_ADMIN'), async (req, res) => {
+  app.post("/api/business-accounts/:id/users", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
       
@@ -780,7 +763,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Users routes (only for BUSINESS_PLAN within their organization)
-  app.get("/api/users", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), async (req: any, res) => {
+  app.get("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       const users = await storage.getUsers(req.businessAccountId);
       const safeUsers = users.map(user => ({
@@ -794,7 +777,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
+  app.post("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
       
@@ -815,7 +798,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/users/:id", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), async (req: any, res) => {
+  app.put("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       // First check if user exists and user has access
       const existingUser = await storage.getUser(req.params.id);
@@ -843,7 +826,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
+  app.delete("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
     try {
       const user = await storage.getUser(req.params.id);
       if (!user) {
@@ -886,13 +869,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Change user password endpoint
-  app.put("/api/users/:id/password", async (req: any, res) => {
+  app.put("/api/users/:id/password", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is authenticated
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
       // Users can only change their own password
       if (req.user.id !== req.params.id) {
         return res.status(403).json({ message: "You can only change your own password" });
@@ -941,13 +919,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update own profile endpoint (for account settings)
-  app.put("/api/users/:id/profile", async (req: any, res) => {
+  app.put("/api/users/:id/profile", requireAuth, async (req: any, res) => {
     try {
-      // Check if user is authenticated
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
       // Users can only update their own profile
       if (req.user.id !== req.params.id) {
         return res.status(403).json({ message: "You can only update your own profile" });
@@ -1012,7 +985,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Legacy agent routes (for backward compatibility)
-  app.get("/api/agents", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, async (req: any, res) => {
+  app.get("/api/agents", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, async (req: any, res) => {
     try {
       const businessAccountId = req.user.role === 'SUPER_ADMIN' ? req.query.businessAccountId : req.businessAccountId;
       const users = await storage.getUsers(businessAccountId);
@@ -1028,7 +1001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Companies routes (requires COMPANIES module)
-  app.get("/api/companies", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
+  app.get("/api/companies", requireAuth, requireBusinessAccountWithId, requireModule('COMPANIES'), async (req: any, res) => {
     try {
       let businessAccountId;
       if (req.user.role === 'SUPER_ADMIN') {
@@ -1139,7 +1112,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Business account modules (new approach)
-  app.get("/api/business-accounts/:businessAccountId/modules", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.get("/api/business-accounts/:businessAccountId/modules", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
     try {
       const { businessAccountId } = req.params;
       
@@ -1156,7 +1129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
       const enabledBy = req.user.id;
@@ -1178,7 +1151,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
       

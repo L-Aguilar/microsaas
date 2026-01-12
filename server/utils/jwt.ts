@@ -1,4 +1,4 @@
-import * as jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 // User type definition for JWT (avoiding @shared dependency)
 interface User {
