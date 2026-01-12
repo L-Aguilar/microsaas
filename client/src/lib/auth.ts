@@ -6,7 +6,7 @@ export interface AuthState {
 }
 
 export const AUTH_STORAGE_KEY = 'crm_auth_user';
-export const SESSION_STORAGE_KEY = 'crm_session_id';
+export const JWT_TOKEN_KEY = 'crm_jwt_token';
 
 export function getStoredUser(): User | null {
   try {
@@ -25,18 +25,18 @@ export function setStoredUser(user: User | null): void {
   }
 }
 
-export function getStoredSessionId(): string | null {
+export function getStoredJwtToken(): string | null {
   try {
-    return localStorage.getItem(SESSION_STORAGE_KEY);
+    return localStorage.getItem(JWT_TOKEN_KEY);
   } catch {
     return null;
   }
 }
 
-export function setStoredSessionId(sessionId: string | null): void {
-  if (sessionId) {
-    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+export function setStoredJwtToken(token: string | null): void {
+  if (token) {
+    localStorage.setItem(JWT_TOKEN_KEY, token);
   } else {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.removeItem(JWT_TOKEN_KEY);
   }
 }

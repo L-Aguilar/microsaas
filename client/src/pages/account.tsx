@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Camera, User, Mail, Lock, Phone, Eye, EyeOff } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
+import { getStoredJwtToken } from "@/lib/auth";
 
 interface ProfileFormData {
   name: string;
@@ -79,12 +80,19 @@ export default function AccountSettings() {
         }
       }
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add JWT token to Authorization header if available
+      const token = getStoredJwtToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}/profile`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers,
         body: JSON.stringify({
           name: profileData.name,
           email: profileData.email,
@@ -138,12 +146,19 @@ export default function AccountSettings() {
 
     setIsPasswordLoading(true);
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add JWT token to Authorization header if available
+      const token = getStoredJwtToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/users/${user.id}/password`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers,
         body: JSON.stringify({
           currentPassword: passwordData.currentPassword,
           newPassword: passwordData.newPassword,

@@ -1,5 +1,6 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { buildApiUrl } from "./api";
+import { getStoredJwtToken } from "./auth";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -19,6 +20,12 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
+  // Add JWT token to Authorization header if available
+  const token = getStoredJwtToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   // Build full API URL if it's an API endpoint
   const fullUrl = url.startsWith('/api/') ? buildApiUrl(url) : url;
 
@@ -26,7 +33,6 @@ export async function apiRequest(
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
   });
 
   await throwIfResNotOk(res);
@@ -42,8 +48,16 @@ export const getQueryFn: <T>(options: {
     const path = queryKey.join("/") as string;
     const fullUrl = path.startsWith('/api/') ? buildApiUrl(path) : path;
     
+    const headers: Record<string, string> = {};
+    
+    // Add JWT token to Authorization header if available
+    const token = getStoredJwtToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    
     const res = await fetch(fullUrl, {
-      credentials: "include",
+      headers,
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

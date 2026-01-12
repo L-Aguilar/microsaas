@@ -2,6 +2,8 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { ModulePermissions } from "@shared/schema";
+import { buildApiUrl } from "@/lib/api";
+import { getStoredJwtToken } from "@/lib/auth";
 
 /**
  * Hook para verificar permisos de módulos según el plan actual
@@ -12,8 +14,16 @@ export function useModulePermissions(moduleType: string) {
   const { data: permissions, isLoading } = useQuery<ModulePermissions>({
     queryKey: ["/api/module-permissions", moduleType],
     queryFn: async () => {
-      const response = await fetch(`/api/module-permissions/${moduleType}`, {
-        credentials: 'include'
+      const headers: Record<string, string> = {};
+      
+      // Add JWT token to Authorization header if available
+      const token = getStoredJwtToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(buildApiUrl(`/api/module-permissions/${moduleType}`), {
+        headers
       });
       
       if (!response.ok) {

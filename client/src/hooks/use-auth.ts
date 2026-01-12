@@ -3,7 +3,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { User } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
-import { getStoredUser, setStoredUser, getStoredSessionId, setStoredSessionId } from "@/lib/auth";
+import { getStoredUser, setStoredUser, getStoredJwtToken, setStoredJwtToken } from "@/lib/auth";
 import { useToast } from "./use-toast";
 
 export function useAuth() {
@@ -26,7 +26,18 @@ export function useAuth() {
 
   useEffect(() => {
     const storedUser = getStoredUser();
-    setUser(storedUser);
+    const storedToken = getStoredJwtToken();
+    
+    // Only set user if we have both user data and JWT token
+    if (storedUser && storedToken) {
+      setUser(storedUser);
+    } else {
+      // Clear any stale data if we don't have complete auth state
+      setUser(null);
+      setStoredUser(null);
+      setStoredJwtToken(null);
+    }
+    
     setIsLoading(false);
   }, []);
 
@@ -43,6 +54,8 @@ export function useAuth() {
       return response.json();
     },
     onSuccess: (data) => {
+      // Store JWT token and user data
+      setStoredJwtToken(data.token);
       setUser(data.user);
       setStoredUser(data.user);
       // Invalidar la query del usuario actual para forzar re-render
@@ -72,6 +85,7 @@ export function useAuth() {
       console.log("🧹 Limpiando estado local...");
       setUser(null);
       setStoredUser(null);
+      setStoredJwtToken(null); // Clear JWT token
       queryClient.clear();
       // Invalidar la query del usuario actual
       queryClient.invalidateQueries({ queryKey: ["auth", "currentUser"] });
