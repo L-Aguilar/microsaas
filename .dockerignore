@@ -1,8 +1,12 @@
 node_modules
-*.log
-.env
 .git
+.env
+*.log
+client_backup
 dist
 build
-client_backup
-*.tmp
+README*.md
+.gitignore
+.nvmrc
+*.backup
+vite.config.ts
