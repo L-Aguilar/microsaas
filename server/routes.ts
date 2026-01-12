@@ -68,6 +68,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Temporary endpoint to create simple admin for testing
+  app.post("/api/create-test-admin", async (req, res) => {
+    try {
+      const testEmail = "admin@controly.com";
+      const testPassword = "admin123";
+      
+      // Check if already exists
+      const existing = await storage.getUserByEmail(testEmail);
+      if (existing) {
+        return res.json({ message: "Test admin already exists", email: testEmail });
+      }
+
+      // Create simple test admin
+      const hashedPassword = hashPassword(testPassword);
+      const testAdmin = {
+        name: "Test Admin",
+        email: testEmail,
+        password: hashedPassword,
+        phone: "+1 555 000 0000",
+        role: "SUPER_ADMIN" as const,
+        avatar: null,
+        businessAccountId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const newUser = await storage.createUser(testAdmin);
+      res.json({ 
+        message: "Test admin created successfully",
+        email: testEmail,
+        password: testPassword,
+        userId: newUser.id
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create test admin", message: (error as Error).message });
+    }
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
