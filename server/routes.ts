@@ -13,7 +13,6 @@ import { secureLog } from "./utils/secureLogger";
 import { checkPlanLimits, attachModulePermissions, updateUsageAfterAction } from "./middleware/planLimitsMiddleware";
 import { planService } from "./services/planService";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -93,9 +92,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Verify password using bcrypt for proper hashing
-      const bcrypt = await import('bcrypt');
-      const isValidPassword = await bcrypt.compare(password, user.password);
+      // Verify password using custom hash function
+      const isValidPassword = verifyPassword(password, user.password);
       
       if (!isValidPassword) {
         // Security audit log for failed login
