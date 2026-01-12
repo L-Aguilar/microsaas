@@ -106,6 +106,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Database debug endpoint
+  app.get("/api/debug-db", async (req, res) => {
+    try {
+      // Check if tables exist
+      const tablesResult = await pool.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        ORDER BY table_name;
+      `);
+      
+      // Check users table
+      let usersCount = 0;
+      let businessAccountsCount = 0;
+      try {
+        const usersResult = await pool.query('SELECT COUNT(*) FROM users');
+        usersCount = parseInt(usersResult.rows[0].count);
+      } catch (e) {}
+      
+      try {
+        const baResult = await pool.query('SELECT COUNT(*) FROM business_accounts');
+        businessAccountsCount = parseInt(baResult.rows[0].count);
+      } catch (e) {}
+
+      res.json({
+        tables: tablesResult.rows.map(r => r.table_name),
+        usersCount,
+        businessAccountsCount,
+        dbUrl: process.env.SUPABASE_DATABASE_URL ? "configured" : "not_configured"
+      });
+    } catch (error) {
+      res.status(500).json({ error: "DB debug failed", message: (error as Error).message });
+    }
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
