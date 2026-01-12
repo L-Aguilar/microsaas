@@ -1,5 +1,12 @@
-import jwt from 'jsonwebtoken';
-import type { User } from '@shared/schema';
+import * as jwt from 'jsonwebtoken';
+
+// User type definition for JWT (avoiding @shared dependency)
+interface User {
+  id: string;
+  email: string;
+  role: string;
+  businessAccountId?: string | null;
+}
 
 // JWT Secret from environment or default (CHANGE IN PRODUCTION)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
