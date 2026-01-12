@@ -10,6 +10,8 @@ import { sendWelcomeEmail } from "./utils/email";
 import { sendEmail, sendWelcomeEmail as sendBrevoWelcomeEmail } from "./services/emailService";
 import { ReminderService } from "./services/reminderService";
 import { secureLog } from "./utils/secureLogger";
+import { generateToken } from "./utils/jwt.js";
+import { requireAuth, requireRole, requireSuperAdmin, requireBusinessAccount } from "./middleware/jwtAuth.js";
 import { checkPlanLimits, attachModulePermissions, updateUsageAfterAction } from "./middleware/planLimitsMiddleware";
 import { planService } from "./services/planService";
 import { z } from "zod";
@@ -303,15 +305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Auth middleware to extract user from session
-  app.use('/api', (req: any, res, next) => {
-    if (req.session?.user) {
-      req.user = req.session.user;
-    }
-    next();
-  });
-
-  // Auth routes
+  // Auth routes (JWT-based, no session middleware needed)
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = loginSchema.parse(req.body);
@@ -340,8 +334,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Create session
-      (req as any).session.user = user;
+      // Generate JWT token instead of session
+      const token = generateToken(user);
 
       // Security audit log
       secureLog.audit('USER_LOGIN_SUCCESS', user.id, { 
@@ -351,6 +345,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.json({ 
+        token,
         user: { ...user, password: undefined }
       });
     } catch (error) {
