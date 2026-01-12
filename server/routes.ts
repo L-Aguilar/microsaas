@@ -276,6 +276,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint to check actual data in tables
+  app.get("/api/debug-data", async (req, res) => {
+    try {
+      const results = {};
+      
+      // Check users
+      const usersResult = await pool.query('SELECT id, email, role FROM users LIMIT 5');
+      results.users = usersResult.rows;
+      
+      // Check business accounts
+      const baResult = await pool.query('SELECT id, name FROM business_accounts LIMIT 5');
+      results.businessAccounts = baResult.rows;
+      
+      // Check modules
+      const modulesResult = await pool.query('SELECT id, name, type FROM modules LIMIT 5');
+      results.modules = modulesResult.rows;
+      
+      // Check companies
+      const companiesResult = await pool.query('SELECT id, name, business_account_id FROM companies LIMIT 5');
+      results.companies = companiesResult.rows;
+      
+      res.json(results);
+    } catch (error) {
+      res.status(500).json({ error: "Data debug failed", message: (error as Error).message });
+    }
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
