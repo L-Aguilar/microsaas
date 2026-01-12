@@ -79,14 +79,15 @@ app.use(cors({
     
     const allowedOrigins = process.env.CORS_ORIGIN ? 
       process.env.CORS_ORIGIN.split(',').map(url => url.trim()) : 
-      ['https://yourdomain.com'];
+      [];
     
     // Allow same-origin requests (no origin header)
     if (!origin) {
       return callback(null, true);
     }
     
-    if (allowedOrigins.includes(origin)) {
+    // Auto-allow Vercel deployments (temporary fix)
+    if (origin.includes('.vercel.app') || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.warn(`🚫 CORS blocked request from unauthorized origin: ${origin}`);
