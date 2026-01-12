@@ -53,6 +53,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Temporary debug endpoint
+  app.get("/api/debug-admin", async (req, res) => {
+    try {
+      const email = process.env.SUPER_ADMIN_EMAIL || "admin@yourcompany.com";
+      const user = await storage.getUserByEmail(email);
+      res.json({ 
+        envEmail: process.env.SUPER_ADMIN_EMAIL || "not_set",
+        envPasswordSet: !!process.env.SUPER_ADMIN_PASSWORD,
+        userExists: !!user,
+        userEmail: user?.email || "no_user"
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Debug failed", message: (error as Error).message });
+    }
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
