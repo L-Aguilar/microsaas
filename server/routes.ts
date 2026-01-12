@@ -1035,7 +1035,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Companies routes (requires COMPANIES module)
   app.get("/api/companies", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
     try {
-      const businessAccountId = req.user.role === 'SUPER_ADMIN' ? req.query.businessAccountId : req.businessAccountId;
+      let businessAccountId;
+      if (req.user.role === 'SUPER_ADMIN') {
+        // SUPER_ADMIN can see all companies or filter by businessAccountId
+        businessAccountId = req.query.businessAccountId || null; // null = all companies
+      } else {
+        businessAccountId = req.businessAccountId;
+      }
       const companies = await storage.getCompanies(businessAccountId);
       res.json(companies);
     } catch (error) {
