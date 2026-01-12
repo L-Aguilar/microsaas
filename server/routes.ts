@@ -141,6 +141,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Simple database connection test
+  app.get("/api/test-db-connection", async (req, res) => {
+    try {
+      const result = await pool.query('SELECT NOW() as current_time');
+      res.json({ 
+        status: "connected",
+        time: result.rows[0].current_time,
+        message: "Database connection successful"
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        status: "failed",
+        error: (error as Error).message 
+      });
+    }
+  });
+
   // Auth middleware to extract user from session
   app.use('/api', (req: any, res, next) => {
     if (req.session?.user) {
