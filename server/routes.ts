@@ -2204,6 +2204,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/plan-modules/:planId", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      await storage.deletePlanModules(req.params.planId);
+      res.json({ message: "Plan modules deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting plan modules:", error);
+      res.status(500).json({ message: "Error al eliminar módulos del plan" });
+    }
+  });
+
   // Available Plans for Business Accounts (all authenticated users can see these)
   app.get("/api/plans/available", requireAuth, async (req, res) => {
     try {

@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Package, DollarSign, Calendar, Settings, Users, Building, BarChart } from "lucide-react";
 import { z } from "zod";
 import { useState, useEffect } from "react";
@@ -42,9 +43,71 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
     canEdit: boolean;
     canDelete: boolean;
   }>>({});
+  
+  const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
+  const [pendingFormData, setPendingFormData] = useState<any>(null);
+  const [originalPrices, setOriginalPrices] = useState<{monthlyPrice: string; annualPrice: string} | null>(null);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Load plan modules for editing
+  const loadPlanModules = async (planId: string) => {
+    try {
+      const response = await apiRequest("GET", `/api/plan-modules?planId=${planId}`);
+      const planModules = await response.json();
+      
+      const initialConfig: typeof moduleConfig = {};
+      
+      // Initialize all modules with defaults
+      Object.values(AVAILABLE_MODULES).forEach(module => {
+        initialConfig[module.type] = {
+          isIncluded: false,
+          itemLimit: module.defaultLimit,
+          canCreate: true,
+          canEdit: true,
+          canDelete: true
+        };
+      });
+
+      // Override with existing plan module settings
+      planModules.forEach((planModule: any) => {
+        // Handle both snake_case (from DB) and camelCase
+        const moduleType = planModule.moduleType || planModule.module_type;
+        const isIncluded = planModule.isIncluded ?? planModule.is_included;
+        const itemLimit = planModule.itemLimit ?? planModule.item_limit;
+        const canCreate = planModule.canCreate ?? planModule.can_create;
+        const canEdit = planModule.canEdit ?? planModule.can_edit;
+        const canDelete = planModule.canDelete ?? planModule.can_delete;
+        
+        if (initialConfig[moduleType]) {
+          initialConfig[moduleType] = {
+            isIncluded,
+            itemLimit,
+            canCreate,
+            canEdit,
+            canDelete
+          };
+        }
+      });
+
+      setModuleConfig(initialConfig);
+    } catch (error) {
+      console.error("Error loading plan modules:", error);
+      // Fallback to defaults
+      const initialConfig: typeof moduleConfig = {};
+      Object.values(AVAILABLE_MODULES).forEach(module => {
+        initialConfig[module.type] = {
+          isIncluded: false,
+          itemLimit: module.defaultLimit,
+          canCreate: true,
+          canEdit: true,
+          canDelete: true
+        };
+      });
+      setModuleConfig(initialConfig);
+    }
+  };
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -64,7 +127,7 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
     },
   });
 
-  // Initialize module config
+  // Initialize module config and capture original prices
   useEffect(() => {
     const initialConfig: typeof moduleConfig = {};
     
@@ -78,8 +141,19 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
       };
     });
 
-    setModuleConfig(initialConfig);
-  }, []);
+    // Load existing plan modules if editing
+    if (plan) {
+      // Capture original prices for comparison
+      setOriginalPrices({
+        monthlyPrice: (plan as any).monthlyPrice || plan.price || '0.00',
+        annualPrice: (plan as any).annualPrice || '0.00'
+      });
+      loadPlanModules(plan.id);
+    } else {
+      setModuleConfig(initialConfig);
+      setOriginalPrices(null);
+    }
+  }, [plan]);
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -101,9 +175,8 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
 
       const planData = await planResponse.json();
 
-      // Create plan modules
+      // Create plan modules - save all modules (included and not included)
       const modulePromises = Object.entries(moduleConfig)
-        .filter(([_, config]) => config.isIncluded)
         .map(async ([moduleType, config]) => {
           await apiRequest("POST", "/api/plan-modules", {
             planId: planData.id,
@@ -137,24 +210,64 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const response = await apiRequest("PUT", `/api/plans/${plan!.id}`, {
-        name: data.name,
-        description: data.description,
-        price: data.monthlyPrice, // Keep legacy field for compatibility
-        monthlyPrice: data.monthlyPrice,
-        annualPrice: data.annualPrice,
-        billingFrequency: 'MONTHLY', // Legacy field
-        trialDays: data.trialDays,
-        status: data.status,
-        isDefault: data.isDefault,
-        isActive: data.isActive,
-        displayOrder: data.displayOrder,
-        features: data.features
+  // Function to execute the actual update
+  const executeUpdate = async (data: any, applyPricesToExisting: boolean = false) => {
+    // Update plan first
+    const response = await apiRequest("PUT", `/api/plans/${plan!.id}`, {
+      name: data.name,
+      description: data.description,
+      price: data.monthlyPrice, // Keep legacy field for compatibility
+      monthlyPrice: data.monthlyPrice,
+      annualPrice: data.annualPrice,
+      billingFrequency: 'MONTHLY', // Legacy field
+      trialDays: data.trialDays,
+      status: data.status,
+      isDefault: data.isDefault,
+      isActive: data.isActive,
+      displayOrder: data.displayOrder,
+      features: data.features
+    });
+
+    const planData = await response.json();
+
+    // If prices changed and user chose to apply to existing clients
+    if (applyPricesToExisting && originalPrices) {
+      const pricesChanged = originalPrices.monthlyPrice !== data.monthlyPrice || 
+                           originalPrices.annualPrice !== data.annualPrice;
+      
+      if (pricesChanged) {
+        await apiRequest("PUT", `/api/plans/${plan!.id}/prices`, {
+          monthlyPrice: data.monthlyPrice,
+          annualPrice: data.annualPrice,
+          applyToExistingCustomers: true
+        });
+      }
+    }
+
+    // Update plan modules - delete existing and recreate
+    await apiRequest("DELETE", `/api/plan-modules/${plan!.id}`);
+
+    // Create new module configurations
+    const modulePromises = Object.entries(moduleConfig)
+      .map(async ([moduleType, config]) => {
+        await apiRequest("POST", "/api/plan-modules", {
+          planId: plan!.id,
+          moduleType,
+          isIncluded: config.isIncluded,
+          itemLimit: config.itemLimit,
+          canCreate: config.canCreate,
+          canEdit: config.canEdit,
+          canDelete: config.canDelete
+        });
       });
-      return response.json();
-    },
+
+    await Promise.all(modulePromises);
+
+    return planData;
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: executeUpdate,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/plans"] });
       toast({
@@ -173,10 +286,45 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
-    if (plan) {
+    if (plan && originalPrices) {
+      // Check if prices have changed
+      const pricesChanged = originalPrices.monthlyPrice !== data.monthlyPrice || 
+                           originalPrices.annualPrice !== data.annualPrice;
+      
+      if (pricesChanged) {
+        // Store form data and show confirmation modal
+        setPendingFormData(data);
+        setShowPriceChangeModal(true);
+        return;
+      }
+      
+      // No price changes, proceed with normal update
       await updateMutation.mutateAsync(data);
     } else {
       await createMutation.mutateAsync(data);
+    }
+  };
+
+  // Handle price change confirmation
+  const handlePriceChangeConfirm = async (applyToExisting: boolean) => {
+    if (pendingFormData) {
+      try {
+        await executeUpdate(pendingFormData, applyToExisting);
+        queryClient.invalidateQueries({ queryKey: ["/api/plans"] });
+        toast({
+          title: "Plan actualizado",
+          description: "El plan ha sido actualizado correctamente",
+        });
+        onSuccess?.();
+        setShowPriceChangeModal(false);
+        setPendingFormData(null);
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "No se pudo actualizar el plan",
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -194,6 +342,7 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
     };
     return icons[moduleType] || Package;
   };
+
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -374,7 +523,9 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
               const Icon = getModuleIcon(module.type);
               const config = moduleConfig[module.type];
               
-              if (!config) return null;
+              if (!config) {
+                return null;
+              }
 
               return (
                 <Card key={module.type} className={`transition-colors ${config.isIncluded ? 'border-blue-200 bg-blue-50' : ''}`}>
@@ -475,6 +626,67 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
           {plan ? 'Actualizar Plan' : 'Crear Plan'}
         </Button>
       </div>
+
+      {/* Price Change Confirmation Modal */}
+      <Dialog open={showPriceChangeModal} onOpenChange={setShowPriceChangeModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cambio de Precios Detectado</DialogTitle>
+            <DialogDescription>
+              Los precios del plan han cambiado. ¿Deseas aplicar estos cambios a los clientes existentes?
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {originalPrices && pendingFormData && (
+              <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-sm">Comparación de precios:</h4>
+                
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Precio mensual anterior:</span>
+                    <span className="font-medium">${originalPrices.monthlyPrice}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Precio mensual nuevo:</span>
+                    <span className="font-medium text-green-600">${pendingFormData.monthlyPrice}</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Precio anual anterior:</span>
+                    <span className="font-medium">${originalPrices.annualPrice}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Precio anual nuevo:</span>
+                    <span className="font-medium text-green-600">${pendingFormData.annualPrice}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex flex-col space-y-3">
+              <Button onClick={() => handlePriceChangeConfirm(false)} variant="outline" className="w-full">
+                Solo aplicar a nuevos clientes
+              </Button>
+              <Button onClick={() => handlePriceChangeConfirm(true)} className="w-full">
+                Aplicar a todos los clientes (nuevos + existentes)
+              </Button>
+              <Button 
+                variant="ghost" 
+                onClick={() => {
+                  setShowPriceChangeModal(false);
+                  setPendingFormData(null);
+                }} 
+                className="w-full"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

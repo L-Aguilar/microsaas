@@ -28,8 +28,6 @@ export default function PlanManagement() {
   const [itemToDelete, setItemToDelete] = useState<{ id: string; type: 'plan' | 'product' } | null>(null);
   const [showPriceEditModal, setShowPriceEditModal] = useState(false);
   const [selectedProductForPriceEdit, setSelectedProductForPriceEdit] = useState<Product | null>(null);
-  const [showPlanPriceEditModal, setShowPlanPriceEditModal] = useState(false);
-  const [selectedPlanForPriceEdit, setSelectedPlanForPriceEdit] = useState<Plan | null>(null);
   const [monthlyPrice, setMonthlyPrice] = useState<string>('');
   const [annualPrice, setAnnualPrice] = useState<string>('');
   
@@ -216,58 +214,6 @@ export default function PlanManagement() {
     setAnnualPrice('');
   };
 
-  const handleEditPlanPrice = (plan: Plan) => {
-    setSelectedPlanForPriceEdit(plan);
-    // Use los nuevos campos de precio dual o fallback al precio legacy
-    setMonthlyPrice((plan as any).monthlyPrice || plan.price || '0.00');
-    setAnnualPrice((plan as any).annualPrice || 
-      (plan.price ? (parseFloat(plan.price) * 10).toFixed(2) : '0.00'));
-    setShowPlanPriceEditModal(true);
-  };
-
-  const handleSavePlanPrices = async () => {
-    if (!selectedPlanForPriceEdit) return;
-    
-    // Directamente actualizar para nuevos clientes solamente
-    await updatePlanPricesMutation.mutateAsync({
-      planId: selectedPlanForPriceEdit.id,
-      priceData: { 
-        monthlyPrice, 
-        annualPrice 
-      },
-      applyToExisting: false
-    });
-
-    setShowPlanPriceEditModal(false);
-    setSelectedPlanForPriceEdit(null);
-    setMonthlyPrice('');
-    setAnnualPrice('');
-  };
-
-  const handleApplyPlanPricesToAllClients = async () => {
-    if (!selectedPlanForPriceEdit) return;
-
-    await updatePlanPricesMutation.mutateAsync({
-      planId: selectedPlanForPriceEdit.id,
-      priceData: { 
-        monthlyPrice, 
-        annualPrice 
-      },
-      applyToExisting: true
-    });
-
-    setShowPlanPriceEditModal(false);
-    setSelectedPlanForPriceEdit(null);
-    setMonthlyPrice('');
-    setAnnualPrice('');
-  };
-
-  const handleCancelEditPlanPrice = () => {
-    setShowPlanPriceEditModal(false);
-    setSelectedPlanForPriceEdit(null);
-    setMonthlyPrice('');
-    setAnnualPrice('');
-  };
 
   // Plan columns
   const planColumns: Column<Plan>[] = [
@@ -290,30 +236,20 @@ export default function PlanManagement() {
       header: "Precios",
       accessor: (plan) => plan.price,
       render: (value, plan) => (
-        <div className="flex items-center space-x-2">
-          <div className="space-y-1">
-            <div className="flex items-center space-x-1">
-              <DollarSign className="h-4 w-4 text-green-500" />
-              <span className="font-medium">${(plan as any).monthlyPrice || plan.price || '0.00'}</span>
-              <span className="text-xs text-muted-foreground">mensual</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <DollarSign className="h-4 w-4 text-blue-500" />
-              <span className="font-medium">
-                ${(plan as any).annualPrice || 
-                  (plan.price ? (parseFloat(plan.price) * 10).toFixed(2) : '0.00')}
-              </span>
-              <span className="text-xs text-muted-foreground">anual</span>
-            </div>
+        <div className="space-y-1">
+          <div className="flex items-center space-x-1">
+            <DollarSign className="h-4 w-4 text-green-500" />
+            <span className="font-medium">${(plan as any).monthlyPrice || plan.price || '0.00'}</span>
+            <span className="text-xs text-muted-foreground">mensual</span>
           </div>
-          <Button 
-            size="sm" 
-            variant="ghost" 
-            onClick={() => handleEditPlanPrice(plan)}
-            className="h-8 w-8 p-0"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center space-x-1">
+            <DollarSign className="h-4 w-4 text-blue-500" />
+            <span className="font-medium">
+              ${(plan as any).annualPrice || 
+                (plan.price ? (parseFloat(plan.price) * 10).toFixed(2) : '0.00')}
+            </span>
+            <span className="text-xs text-muted-foreground">anual</span>
+          </div>
         </div>
       ),
     },
@@ -789,115 +725,6 @@ export default function PlanManagement() {
         </DialogContent>
       </Dialog>
 
-      {/* Plan Price Edit Modal */}
-      <Dialog open={showPlanPriceEditModal} onOpenChange={setShowPlanPriceEditModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Editar Precios del Plan</DialogTitle>
-            <DialogDescription>
-              Configura los precios mensual y anual para este plan
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <h4 className="font-medium text-sm">
-                {selectedPlanForPriceEdit?.name}
-              </h4>
-              
-              {/* Precio Mensual */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">
-                  Precio Mensual
-                </label>
-                <div className="flex items-center space-x-2">
-                  <DollarSign className="h-4 w-4 text-green-500" />
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={monthlyPrice}
-                    onChange={(e) => setMonthlyPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="flex-1"
-                  />
-                  <span className="text-sm text-muted-foreground">/ mes</span>
-                </div>
-              </div>
-              
-              {/* Precio Anual */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">
-                  Precio Anual
-                </label>
-                <div className="flex items-center space-x-2">
-                  <DollarSign className="h-4 w-4 text-blue-500" />
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={annualPrice}
-                    onChange={(e) => setAnnualPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="flex-1"
-                  />
-                  <span className="text-sm text-muted-foreground">/ año</span>
-                </div>
-              </div>
-              
-              {/* Descuento Calculado */}
-              <div className="pt-3 border-t border-gray-200">
-                {monthlyPrice && annualPrice ? (() => {
-                  const monthly = parseFloat(monthlyPrice);
-                  const annual = parseFloat(annualPrice);
-                  const yearlyIfMonthly = monthly * 12;
-                  const savings = yearlyIfMonthly - annual;
-                  const discountPercent = (savings / yearlyIfMonthly * 100);
-                  const monthlyEquivalent = annual / 12;
-                  
-                  return (
-                    <>
-                      <div className="text-sm text-gray-600 space-y-1">
-                        <div>
-                          <strong>Precio anual vs 12 meses:</strong>
-                        </div>
-                        <div className="ml-2 space-y-1">
-                          <div>• Pagando mensual: ${yearlyIfMonthly.toFixed(2)}/año</div>
-                          <div>• Pagando anual: ${annual.toFixed(2)}/año</div>
-                          <div>• <strong>Ahorro: ${savings.toFixed(2)} ({discountPercent.toFixed(1)}%)</strong></div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-gray-100">
-                        Precio mensual equivalente del plan anual: ${monthlyEquivalent.toFixed(2)}/mes
-                      </div>
-                    </>
-                  );
-                })() : (
-                  <div className="text-sm text-muted-foreground">
-                    Ingresa ambos precios para ver el cálculo de descuento
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="flex flex-col space-y-3">
-              <Button onClick={handleSavePlanPrices} className="w-full">
-                Guardar Precios (Solo Nuevos Clientes)
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={handleApplyPlanPricesToAllClients}
-                className="w-full"
-              >
-                Aplicar a Todos los Clientes (Nuevos + Existentes)
-              </Button>
-              <Button variant="ghost" onClick={handleCancelEditPlanPrice} className="w-full">
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
     </div>
   );

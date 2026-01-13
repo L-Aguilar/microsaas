@@ -69,6 +69,7 @@ export interface IStorage {
   // Plan Modules Management
   getPlanModules(planId: string): Promise<PlanModule[]>;
   createPlanModule(planModule: InsertPlanModule): Promise<PlanModule>;
+  deletePlanModules(planId: string): Promise<void>;
   updatePlanModule(id: string, planModule: Partial<InsertPlanModule>): Promise<PlanModule | undefined>;
   deletePlanModule(id: string): Promise<boolean>;
 
@@ -1629,7 +1630,7 @@ export class DatabaseStorage implements IStorage {
     const query = `
       SELECT ba.name 
       FROM business_accounts ba 
-      WHERE ba.plan_id = $1
+      WHERE ba.plan = $1
     `;
     const result = await pool.query(query, [planId]);
     const companies = result.rows.map(row => row.name);
@@ -1784,6 +1785,11 @@ export class DatabaseStorage implements IStorage {
     const query = `SELECT * FROM plan_modules WHERE plan_id = $1`;
     const result = await pool.query(query, [planId]);
     return result.rows;
+  }
+
+  async deletePlanModules(planId: string): Promise<void> {
+    const query = `DELETE FROM plan_modules WHERE plan_id = $1`;
+    await pool.query(query, [planId]);
   }
 
   async createPlanModule(planModule: InsertPlanModule): Promise<PlanModule> {
