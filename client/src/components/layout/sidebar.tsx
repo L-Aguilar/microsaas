@@ -6,7 +6,7 @@ import { useModulePermissions } from "@/hooks/use-module-permissions";
 import { ChartLine, ChartPie, Building, Target, BarChart3, LogOut, Users, Menu, Settings, User, ChevronDown, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getCurrentThemeConfig } from "@shared/theme-config";
+import { getCurrentThemeConfig } from "@shared/schema";
 
 const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCompanies: boolean, canViewCRM: boolean, canViewReports: boolean) => {
   const baseNavigation = [

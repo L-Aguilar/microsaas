@@ -7,7 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/contexts/sidebar-context";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "./hooks/use-auth";
-import { CURRENT_THEME } from "@shared/theme-config";
+import { CURRENT_THEME } from "@shared/schema";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";

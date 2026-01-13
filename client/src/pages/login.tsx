@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { ChartLine, Loader2, Eye, EyeOff, HelpCircle } from "lucide-react";
-import { getCurrentThemeConfig } from "@shared/theme-config";
+import { getCurrentThemeConfig } from "@shared/schema";
 
 export default function Login() {
   const [email, setEmail] = useState("");
