@@ -25,32 +25,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const authHeader = req.headers.authorization;
     
-    // Debug logging for production
-    console.log('🔐 Auth Debug:', {
-      hasAuthHeader: !!authHeader,
-      authHeaderPrefix: authHeader?.substring(0, 20) + '...',
-      url: req.url,
-      method: req.method
-    });
-    
     if (!authHeader) {
-      console.log('❌ No auth header provided');
       return res.status(401).json({ message: 'Authentication required' });
     }
 
     const token = extractTokenFromHeader(authHeader);
     if (!token) {
-      console.log('❌ Invalid token format');
       return res.status(401).json({ message: 'Invalid token format' });
     }
 
     const payload = verifyToken(token);
     if (!payload) {
-      console.log('❌ Token verification failed');
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
-
-    console.log('✅ Token verified for user:', payload.userId);
 
     // Verify user still exists in database
     const user = await storage.getUser(payload.userId);
@@ -102,20 +89,25 @@ export function requireSuperAdmin(req: Request, res: Response, next: NextFunctio
 
 /**
  * Require business account (except for SUPER_ADMIN)
+ * Automatically includes JWT authentication
  */
 export function requireBusinessAccount(req: Request, res: Response, next: NextFunction) {
-  if (!req.user) {
-    return res.status(401).json({ message: 'Authentication required' });
-  }
+  // First ensure user is authenticated
+  return requireAuth(req, res, () => {
+    // Then check business account requirements
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
 
-  // SUPER_ADMIN can access without business account restriction
-  if (req.user.role === 'SUPER_ADMIN') {
-    return next();
-  }
+    // SUPER_ADMIN can access without business account restriction
+    if (req.user.role === 'SUPER_ADMIN') {
+      return next();
+    }
 
-  if (!req.user.businessAccountId) {
-    return res.status(403).json({ message: 'Business account required' });
-  }
+    if (!req.user.businessAccountId) {
+      return res.status(403).json({ message: 'Business account required' });
+    }
 
-  next();
+    next();
+  });
 }
