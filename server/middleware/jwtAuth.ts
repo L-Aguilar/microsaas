@@ -25,19 +25,32 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const authHeader = req.headers.authorization;
     
+    // Debug logging for production
+    console.log('🔐 Auth Debug:', {
+      hasAuthHeader: !!authHeader,
+      authHeaderPrefix: authHeader?.substring(0, 20) + '...',
+      url: req.url,
+      method: req.method
+    });
+    
     if (!authHeader) {
+      console.log('❌ No auth header provided');
       return res.status(401).json({ message: 'Authentication required' });
     }
 
     const token = extractTokenFromHeader(authHeader);
     if (!token) {
+      console.log('❌ Invalid token format');
       return res.status(401).json({ message: 'Invalid token format' });
     }
 
     const payload = verifyToken(token);
     if (!payload) {
+      console.log('❌ Token verification failed');
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
+
+    console.log('✅ Token verified for user:', payload.userId);
 
     // Verify user still exists in database
     const user = await storage.getUser(payload.userId);

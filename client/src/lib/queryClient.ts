@@ -24,6 +24,9 @@ export async function apiRequest(
   const token = getStoredJwtToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+    console.log('🔑 Sending JWT token:', token.substring(0, 20) + '...');
+  } else {
+    console.log('❌ No JWT token found in localStorage');
   }
 
   // Build full API URL if it's an API endpoint
@@ -54,6 +57,9 @@ export const getQueryFn: <T>(options: {
     const token = getStoredJwtToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+      console.log('🔑 Query JWT token:', token.substring(0, 20) + '...');
+    } else {
+      console.log('❌ No JWT token for query');
     }
     
     const res = await fetch(fullUrl, {
