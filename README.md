@@ -28,11 +28,17 @@ Un CRM moderno y completo para la gestión de empresas, clientes, oportunidades 
 - **Node.js** - Runtime de JavaScript
 - **Express.js** - Framework web
 - **TypeScript** - Tipado estático
+- **JWT** - Autenticación basada en tokens
 - **PostgreSQL** - Base de datos
 - **Supabase** - Plataforma de base de datos
 - **Drizzle ORM** - ORM moderno
 - **bcrypt** - Hashing de contraseñas
 - **Helmet** - Seguridad HTTP
+
+### Deployment
+- **Frontend**: Vercel (Configurado y funcionando)
+- **Backend**: Railway (Configurado y funcionando)
+- **Database**: Supabase (PostgreSQL)
 
 ## 🚀 Instalación y Configuración
 
@@ -118,52 +124,74 @@ npm run generate:secrets
 
 ## 📦 Despliegue a Producción
 
-### Despliegue en Vercel (Recomendado)
+Este proyecto está configurado para deployment distribuido:
+- **Frontend**: Vercel
+- **Backend**: Railway  
+- **Base de datos**: Supabase
 
-#### 1. Preparar el repositorio
-```bash
-# Verificar que no hay archivos sensibles
-git status
+### Prerequisitos de Deployment
+1. Cuenta de [Vercel](https://vercel.com) (para frontend)
+2. Cuenta de [Railway](https://railway.app) (para backend)
+3. Proyecto de [Supabase](https://supabase.com) (para base de datos)
+4. Repositorio de GitHub con el código
 
-# Agregar cambios
-git add .
-git commit -m "feat: Prepare for production deployment"
-git push origin main
+### Frontend - Vercel
+
+#### 1. Configuración de Vercel
+1. Conecta tu repositorio en [Vercel](https://vercel.com)
+2. **Root Directory**: `client`
+3. **Framework**: Vite
+4. **Build Command**: `npm ci && npm run build`
+5. **Output Directory**: `dist` (automático)
+
+#### 2. Variables de entorno en Vercel
+```env
+VITE_API_URL=https://tu-backend.up.railway.app
 ```
 
-#### 2. Configurar Vercel
-1. Ve a [Vercel](https://vercel.com) y conecta tu repositorio
-2. Importa tu proyecto de GitHub
-3. Configura las variables de entorno en Vercel Dashboard:
+### Backend - Railway
 
+#### 1. Configuración de Railway
+1. Conecta tu repositorio en [Railway](https://railway.app)
+2. El archivo `railway.json` se usa automáticamente
+3. **Start Command**: `npm start`
+
+#### 2. Variables de entorno en Railway
 ```env
-DATABASE_URL=tu_url_de_supabase
-SESSION_SECRET=tu_secreto_super_seguro
+# Base de datos
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
+SUPABASE_DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
+
+# Seguridad
+SESSION_SECRET=tu-secreto-super-seguro-64-chars
+JWT_SECRET=otro-secreto-para-jwt-tokens
 SUPER_ADMIN_EMAIL=admin@tuempresa.com
 SUPER_ADMIN_PASSWORD=ContraseñaSegura123!
-CORS_ORIGIN=https://tu-app.vercel.app
+
+# CORS (incluir dominio de Vercel)
+CORS_ORIGIN=https://tu-app.vercel.app,https://tudominio.com
+
+# Configuración
 NODE_ENV=production
+PORT=8080
 ```
 
-#### 3. Deploy automático
-- Vercel detectará automáticamente la configuración
-- El deploy se ejecutará automáticamente
-- Tu app estará disponible en `https://tu-proyecto.vercel.app`
+### Verificación del Deployment
 
-### Configuración adicional
+#### Build local antes del deploy
 ```bash
-# Verificar build local antes del deploy
-npm run build
+# Frontend
+cd client && npm run build
 
-# Verificar que el proyecto funciona
-npm run start
+# Backend (verificar que compila)
+npx tsx server/index.ts
 ```
 
 ### Variables de entorno críticas
-- `DATABASE_URL`: URL de conexión a Supabase
-- `SESSION_SECRET`: Clave secreta para sesiones (64+ caracteres)
-- `SUPER_ADMIN_PASSWORD`: Contraseña del administrador
-- `CORS_ORIGIN`: Dominio de tu aplicación en producción
+- **Frontend**: `VITE_API_URL` debe apuntar a Railway
+- **Backend**: `CORS_ORIGIN` debe incluir dominio de Vercel
+- **Database**: `DATABASE_URL` de Supabase
+- **Security**: `JWT_SECRET` y `SESSION_SECRET` únicos
 
 ## 📁 Estructura del Proyecto
 
@@ -175,18 +203,62 @@ Controly/
 │   │   ├── pages/         # Páginas de la aplicación
 │   │   ├── hooks/         # Custom hooks
 │   │   ├── lib/           # Utilidades y configuración
-│   │   └── contexts/      # Contextos de React
+│   │   ├── contexts/      # Contextos de React
+│   │   └── types/         # Tipos TypeScript frontend-only
+│   │       └── schema.ts  # Schema sin dependencias drizzle-orm
 │   └── index.html
 ├── server/                # Backend Express
 │   ├── routes.ts          # Definición de rutas
 │   ├── storage.ts         # Capa de datos
+│   ├── middleware/        # Middlewares JWT, permisos, etc.
 │   ├── services/          # Servicios (email, etc.)
 │   └── utils/             # Utilidades del servidor
-├── shared/                # Código compartido
-│   ├── schema.ts          # Esquemas de validación
+├── shared/                # Código compartido (solo backend)
+│   ├── schema.ts          # Schema completo con drizzle-orm
 │   └── theme-config.ts    # Configuración de tema
-└── scripts/               # Scripts de utilidad
+├── scripts/               # Scripts de utilidad
+├── railway.json           # Configuración Railway
+└── vercel.json.backup     # Configuración Vercel (usar dashboard)
 ```
+
+## 🏗️ Arquitectura del Schema
+
+**⚠️ IMPORTANTE**: Este proyecto usa una arquitectura de schema dual para evitar conflictos de dependencias.
+
+### Schema Backend (`/shared/schema.ts`)
+- **Ubicación**: `/shared/schema.ts`
+- **Uso**: Server-side únicamente
+- **Dependencias**: Incluye `drizzle-orm`, `drizzle-zod`
+- **Contenido**: Definiciones completas de tablas, relaciones, y validaciones
+
+### Schema Frontend (`client/src/types/schema.ts`)
+- **Ubicación**: `client/src/types/schema.ts`
+- **Uso**: Frontend únicamente
+- **Dependencias**: Solo `zod` (sin drizzle-orm)
+- **Contenido**: Tipos TypeScript, interfaces, y validaciones para formularios
+
+### Configuración de Aliases
+```ts
+// client/vite.config.ts
+resolve: {
+  alias: {
+    "@": resolve(__dirname, "src"),
+    "@shared": resolve(__dirname, "src/types"), // Apunta al schema frontend
+  },
+}
+```
+
+### ¿Por qué esta arquitectura?
+1. **Build separado**: Evita errores de `drizzle-orm` en builds de frontend
+2. **Optimización**: Frontend no incluye dependencias innecesarias del backend
+3. **Mantenimiento**: Cada parte usa solo lo que necesita
+4. **Deployment**: Permite deployment distribuido (Vercel + Railway)
+
+### Mantenimiento del Schema
+⚠️ **Al modificar schemas**: Mantener ambos archivos sincronizados manualmente:
+1. Actualizar `/shared/schema.ts` (backend)
+2. Sincronizar cambios en `client/src/types/schema.ts` (frontend)
+3. Verificar que `AVAILABLE_MODULES` tenga estructura completa con `name`, `type`, `defaultLimit`
 
 ## 🔑 Credenciales por Defecto
 
@@ -208,11 +280,49 @@ Controly/
 
 Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
 
+## 🛠️ Troubleshooting
+
+### Errores Comunes en Deployment
+
+#### Error: `drizzle-orm` not found en Vercel
+**Síntoma**: Build falla con "Rollup failed to resolve import 'drizzle-orm'"
+**Solución**: Verificar que `@shared` apunte a `client/src/types` y no a `/shared`
+
+#### Error: Módulos sin nombres en plan-form
+**Síntoma**: Los módulos aparecen en blanco en el formulario de planes
+**Causa**: `AVAILABLE_MODULES` es array en lugar de objeto con propiedades
+**Solución**: Usar `client/src/types/schema.ts` con estructura completa
+
+#### Error: 401 en endpoints específicos
+**Síntoma**: Algunos endpoints devuelven 401 mientras otros funcionan
+**Causa**: `requireBusinessAccount` middleware no incluye `requireAuth`
+**Solución**: Ya resuelto en la versión actual
+
+#### Error: CORS en producción
+**Síntoma**: Requests desde Vercel a Railway fallan por CORS
+**Solución**: Agregar dominio de Vercel a `CORS_ORIGIN` en Railway
+
+### Comandos de Diagnóstico
+
+```bash
+# Verificar build frontend
+cd client && npm run build
+
+# Verificar tipos
+npm run check
+
+# Verificar conexión BD
+curl https://tu-backend.railway.app/api/debug-db
+
+# Verificar autenticación
+curl -H "Authorization: Bearer TOKEN" https://tu-backend.railway.app/api/opportunities
+```
+
 ## 🆘 Soporte
 
 Si tienes problemas o preguntas:
 - Abre un issue en GitHub
-- Revisa la documentación en `/docs`
+- Revisa la sección de Troubleshooting
 - Contacta al equipo de desarrollo
 
 ## 🚀 Roadmap
