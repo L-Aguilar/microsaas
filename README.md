@@ -218,7 +218,8 @@ Controly/
 │   └── theme-config.ts    # Configuración de tema
 ├── scripts/               # Scripts de utilidad
 ├── railway.json           # Configuración Railway
-└── vercel.json.backup     # Configuración Vercel (usar dashboard)
+├── vercel.json.backup     # Configuración Vercel (backup)
+└── client/vercel.json     # Configuración SPA routing para Vercel
 ```
 
 ## 🏗️ Arquitectura del Schema
@@ -301,6 +302,11 @@ Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más det
 #### Error: CORS en producción
 **Síntoma**: Requests desde Vercel a Railway fallan por CORS
 **Solución**: Agregar dominio de Vercel a `CORS_ORIGIN` en Railway
+
+#### Error: 404 al hacer refresh en rutas
+**Síntoma**: Error 404 cuando haces refresh en `/companies`, `/dashboard`, etc.
+**Causa**: SPA routing no configurado en Vercel
+**Solución**: `client/vercel.json` con rewrite rules (ya incluido)
 
 ### Comandos de Diagnóstico
 
