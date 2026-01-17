@@ -70,9 +70,12 @@ app.use(helmet({
 // Configure CORS with strict origin validation
 app.use(cors({
   origin: (origin, callback) => {
+    console.log(`🌐 CORS check for origin: ${origin}`);
+    
     // In development, allow localhost
     if (process.env.NODE_ENV === 'development') {
       if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        console.log('✅ CORS allowed: Development localhost');
         return callback(null, true);
       }
     }
@@ -81,13 +84,19 @@ app.use(cors({
       process.env.CORS_ORIGIN.split(',').map(url => url.trim()) : 
       [];
     
+    console.log(`📋 Allowed origins: ${JSON.stringify(allowedOrigins)}`);
+    
     // Allow same-origin requests (no origin header)
     if (!origin) {
+      console.log('✅ CORS allowed: Same-origin request');
       return callback(null, true);
     }
     
-    // Auto-allow Vercel deployments (temporary fix)
-    if (origin.includes('.vercel.app') || allowedOrigins.includes(origin)) {
+    // Auto-allow Vercel deployments (temporary fix) + specific origins
+    if (origin.includes('.vercel.app') || 
+        allowedOrigins.includes(origin) || 
+        origin === 'https://microsaas-theta.vercel.app') {
+      console.log('✅ CORS allowed: Verified origin');
       callback(null, true);
     } else {
       console.warn(`🚫 CORS blocked request from unauthorized origin: ${origin}`);
@@ -162,12 +171,23 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
+  
+  // Log critical environment variables for debugging
+  console.log('🔧 Environment check:');
+  console.log(`📡 PORT: ${port}`);
+  console.log(`🔒 JWT_SECRET set: ${!!process.env.JWT_SECRET}`);
+  console.log(`🗄️  DATABASE_URL set: ${!!process.env.SUPABASE_DATABASE_URL}`);
+  console.log(`🌐 CORS_ORIGIN: ${process.env.CORS_ORIGIN || 'not_set'}`);
+  console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`📧 SUPER_ADMIN_EMAIL: ${process.env.SUPER_ADMIN_EMAIL || 'not_set'}`);
+  
   server.listen({
     port,
     host: "0.0.0.0",
     reusePort: true,
   }, () => {
-    log(`serving on port ${port}`);
+    log(`🚀 Server running on port ${port}`);
+    log(`🌐 CORS configured for: ${process.env.CORS_ORIGIN || 'Vercel apps'}`);
   });
 })();
 
