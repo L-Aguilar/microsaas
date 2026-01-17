@@ -295,7 +295,7 @@ export default function AccountSettings() {
                     <Label htmlFor="role">Rol</Label>
                     <Input
                       id="role"
-                      value={user?.role === 'BUSINESS_PLAN' ? 'Plan de Negocio' : 
+                      value={user?.role === 'BUSINESS_ADMIN' ? 'Administrador de Empresa' : 
                             user?.role === 'USER' ? 'Usuario' : 
                             user?.role === 'SUPER_ADMIN' ? 'Super Administrador' : 
                             user?.role || "No especificado"}

@@ -10,12 +10,13 @@ if (!process.env.SUPABASE_DATABASE_URL) {
 
 const databaseUrl = process.env.SUPABASE_DATABASE_URL;
 
-// Create connection pool with optimized settings
+// Create connection pool with optimized settings for Supabase
 export const pool = new Pool({ 
   connectionString: databaseUrl,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  max: 10, // Reduced from 20 to prevent connection overload
+  idleTimeoutMillis: 60000, // Increased to 60 seconds
+  connectionTimeoutMillis: 10000, // Increased to 10 seconds
+  statement_timeout: 60000, // 60 second query timeout
   ssl: {
     rejectUnauthorized: false // Required for Supabase pooler connections
   }

@@ -25,7 +25,7 @@ export default function Companies() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const { canCreate, canEdit, canDelete, isAtLimit, currentCount, itemLimit } = useModulePermissions('COMPANIES');
+  const { canCreate, canEdit, canDelete, isAtLimit, currentCount, itemLimit } = useModulePermissions('CONTACTS');
 
   const { data: companies = [], isLoading } = useQuery<CompanyWithRelations[]>({
     queryKey: ["/api/companies"],
@@ -236,9 +236,9 @@ export default function Companies() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-medium">Límite de Empresas</h4>
+                <h4 className="font-medium">Límite de Contactos</h4>
                 <p className="text-sm text-muted-foreground">
-                  {currentCount} de {itemLimit} empresas utilizadas
+                  {currentCount} de {itemLimit} contactos utilizados
                   {currentCount >= itemLimit && " - Has alcanzado el límite de tu plan"}
                   {currentCount >= itemLimit * 0.8 && currentCount < itemLimit && " - Te acercas al límite de tu plan"}
                 </p>
@@ -260,19 +260,19 @@ export default function Companies() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Empresas</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Contactos</h1>
           <p className="text-muted-foreground">
-            Gestiona las empresas y clientes de tu organización.
+            Gestiona los contactos y clientes de tu organización.
           </p>
         </div>
         <Button 
           onClick={() => setShowCreateModal(true)}
           disabled={!canCreate || isAtLimit}
-          title={!canCreate ? "No tienes permisos para crear empresas" : 
-                 isAtLimit ? `Has alcanzado el límite de ${itemLimit} empresas` : ""}
+          title={!canCreate ? "No tienes permisos para crear contactos" : 
+                 isAtLimit ? `Has alcanzado el límite de ${itemLimit} contactos` : ""}
         >
           <Plus className="mr-2 h-4 w-4" />
-          Nueva Empresa
+          Nuevo Contacto
           {isAtLimit && itemLimit && (
             <span className="ml-2 text-xs">({currentCount}/{itemLimit})</span>
           )}
@@ -288,7 +288,7 @@ export default function Companies() {
                 <Building className="h-6 w-6 text-blue-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Total Empresas</p>
+                <p className="text-sm font-medium text-muted-foreground">Total Contactos</p>
                 <p className="text-2xl font-bold text-foreground">{companies.length}</p>
               </div>
             </div>
@@ -348,21 +348,21 @@ export default function Companies() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Building className="h-5 w-5" />
-            Lista de Empresas
+            Lista de Contactos
           </CardTitle>
         </CardHeader>
         <CardContent>
           <DataTable
             data={companies}
             columns={columns}
-            searchPlaceholder="Buscar empresas por nombre, contacto..."
+            searchPlaceholder="Buscar contactos por nombre, empresa..."
                             itemsPerPage={10}
             onRowClick={handleRowClick}
           />
         </CardContent>
       </Card>
 
-      {/* Modal para nueva empresa */}
+      {/* Modal para nuevo contacto */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
         <DialogContent className="max-w-2xl">
           <CompanyForm
@@ -375,7 +375,7 @@ export default function Companies() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal para editar empresa */}
+      {/* Modal para editar contacto */}
       <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
         <DialogContent className="max-w-2xl">
           {editingCompany && (
@@ -399,8 +399,8 @@ export default function Companies() {
       <ConfirmationDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
-        title="Eliminar Empresa"
-        description="¿Estás seguro de que quieres eliminar esta empresa? Esta acción no se puede deshacer."
+        title="Eliminar Contacto"
+        description="¿Estás seguro de que quieres eliminar este contacto? Esta acción no se puede deshacer."
         onConfirm={confirmDelete}
         confirmText="Eliminar"
         cancelText="Cancelar"

@@ -77,7 +77,7 @@ export default function Dashboard({
     },
   ];
 
-  // Regular dashboard cards for BUSINESS_PLAN and USER roles
+  // Regular dashboard cards for BUSINESS_ADMIN and USER roles
   const regularStatsCards = [
     {
       title: "Oportunidades Ganadas",

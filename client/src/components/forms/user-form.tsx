@@ -16,7 +16,7 @@ import { cleanPhoneNumber } from "@/lib/phoneUtils";
 import { z } from "zod";
 
 const userFormSchema = insertUserSchema.extend({
-  role: z.enum(['SUPER_ADMIN', 'BUSINESS_PLAN', 'USER']).default('USER'),
+  role: z.enum(['SUPER_ADMIN', 'BUSINESS_ADMIN', 'USER']).default('USER'),
 }).omit({ password: true });
 
 type UserFormData = z.infer<typeof userFormSchema>;
@@ -162,12 +162,12 @@ export default function UserForm({ user, onClose, onCancel, businessAccountId, o
   const getAvailableRoles = () => {
     if (currentUser?.role === 'SUPER_ADMIN') {
       return [
-        { value: 'BUSINESS_PLAN', label: 'Admin Empresa' },
+        { value: 'BUSINESS_ADMIN', label: 'Admin Empresa' },
         { value: 'USER', label: 'Usuario' },
       ];
-    } else if (currentUser?.role === 'BUSINESS_PLAN') {
+    } else if (currentUser?.role === 'BUSINESS_ADMIN') {
       return [
-        { value: 'BUSINESS_PLAN', label: 'Admin Empresa' },
+        { value: 'BUSINESS_ADMIN', label: 'Admin Empresa' },
         { value: 'USER', label: 'Usuario' },
       ];
     } else {

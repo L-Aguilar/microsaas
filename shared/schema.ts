@@ -8,8 +8,8 @@ export const companyStatusEnum = pgEnum('company_status', ['LEAD', 'ACTIVE', 'IN
 export const opportunityTypeEnum = pgEnum('opportunity_type', ['NEW_CLIENT', 'ADDITIONAL_PROJECT']);
 export const opportunityStatusEnum = pgEnum('opportunity_status', ['NEW', 'IN_PROGRESS', 'NEGOTIATION', 'WON', 'LOST']);
 export const activityTypeEnum = pgEnum('activity_type', ['CALL', 'MEETING', 'NOTE']);
-export const userRoleEnum = pgEnum('user_role', ['SUPER_ADMIN', 'BUSINESS_PLAN', 'USER']);
-export const moduleTypeEnum = pgEnum('module_type', ['USERS', 'COMPANIES', 'CRM', 'REPORTS']);
+export const userRoleEnum = pgEnum('user_role', ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'USER']);
+export const moduleTypeEnum = pgEnum('module_type', ['USERS', 'CONTACTS', 'CRM']);
 
 // SaaS Plan and Billing Enums
 export const billingFrequencyEnum = pgEnum('billing_frequency', ['MONTHLY', 'ANNUAL']);
@@ -47,7 +47,7 @@ export const modules = pgTable("modules", {
 export const businessAccounts = pgTable("business_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
-  plan: text("plan").notNull().default('BUSINESS_PLAN'),
+  plan: text("plan").notNull().default('BUSINESS_ADMIN'),
   isActive: boolean("is_active").default(true).notNull(),
   deletedAt: timestamp("deleted_at"), // Soft delete timestamp
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -209,9 +209,9 @@ export type CompanyWithRelations = Company & {
 };
 
 export type BusinessAccountWithRelations = BusinessAccount & {
-  contactEmail: string | null; // Email from the BUSINESS_PLAN user
-  contactName: string | null; // Name from the BUSINESS_PLAN user
-  contactPhone: string | null; // Phone from the BUSINESS_PLAN user
+  contactEmail: string | null; // Email from the BUSINESS_ADMIN user
+  contactName: string | null; // Name from the BUSINESS_ADMIN user
+  contactPhone: string | null; // Phone from the BUSINESS_ADMIN user
   modules: ModuleWithStatus[];
   users: User[];
   companies: Company[];
@@ -262,10 +262,10 @@ export const AVAILABLE_MODULES = {
     hasLimits: true,
     defaultLimit: 5
   },
-  COMPANIES: {
-    name: 'Empresas',
-    type: 'COMPANIES' as const, 
-    description: 'Gestión de empresas y contactos comerciales',
+  CONTACTS: {
+    name: 'Contactos',
+    type: 'CONTACTS' as const, 
+    description: 'Gestión de contactos y clientes',
     hasLimits: true,
     defaultLimit: 100
   },
@@ -273,13 +273,6 @@ export const AVAILABLE_MODULES = {
     name: 'CRM',
     type: 'CRM' as const,
     description: 'Gestión de relaciones con clientes, oportunidades y actividades',
-    hasLimits: false,
-    defaultLimit: null
-  },
-  REPORTS: {
-    name: 'Reportes',
-    type: 'REPORTS' as const,
-    description: 'Generación de reportes y análisis del negocio',
     hasLimits: false,
     defaultLimit: null
   }
@@ -328,9 +321,6 @@ export const planModules = pgTable("plan_modules", {
   moduleType: moduleTypeEnum("module_type").notNull(),
   isIncluded: boolean("is_included").default(true).notNull(),
   itemLimit: integer("item_limit"), // null = unlimited, number = limit (e.g., max users, companies)
-  canCreate: boolean("can_create").default(true).notNull(),
-  canEdit: boolean("can_edit").default(true).notNull(),
-  canDelete: boolean("can_delete").default(true).notNull(),
   features: text("features").array(), // Specific features for this module in this plan
 });
 

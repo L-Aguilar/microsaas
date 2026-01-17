@@ -27,7 +27,7 @@ const businessAccountSchema = z.object({
   contactEmail: z.string().email("Debe ser un email válido"),
   contactName: z.string().optional(),
   contactPhone: z.string().optional(),
-  plan: z.string().default("BUSINESS_PLAN"),
+  plan: z.string().default("BUSINESS_ADMIN"),
   isActive: z.boolean().default(true),
   enabledModules: z.array(z.string()).default([]),
 });
@@ -66,7 +66,7 @@ export default function BusinessAccountForm({
 
   // Only use modules that actually exist and are implemented
   const availableModules = modules.filter(module => 
-    ['USERS', 'COMPANIES', 'CRM'].includes(module.type)
+    ['USERS', 'CONTACTS', 'CRM'].includes(module.type)
   );
 
   // Update phone state when initialData changes
@@ -85,7 +85,7 @@ export default function BusinessAccountForm({
       contactEmail: initialData?.contactEmail || "",
       contactName: initialData?.contactName || "",
       contactPhone: initialData?.contactPhone || "",
-      plan: initialData?.plan || "BUSINESS_PLAN",
+      plan: initialData?.plan || "BUSINESS_ADMIN",
       isActive: initialData?.isActive ?? true,
       enabledModules: [], // For new accounts, start with no modules
     },

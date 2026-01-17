@@ -70,7 +70,7 @@ export default function ModulesPage() {
     },
   });
 
-  // For Company modules (BUSINESS_PLAN)
+  // For Company modules (BUSINESS_ADMIN)
   const enableCompanyModuleMutation = useMutation({
     mutationFn: async ({ companyId, moduleId }: { companyId: string; moduleId: string }) => {
       await apiRequest("POST", `/api/companies/${companyId}/modules/${moduleId}/enable`);
@@ -258,7 +258,7 @@ export default function ModulesPage() {
           )}
         </>
       ) : (
-        /* BUSINESS_PLAN: Company Modules Management */
+        /* BUSINESS_ADMIN: Company Modules Management */
         <>
           {!companies?.length ? (
             <Card>

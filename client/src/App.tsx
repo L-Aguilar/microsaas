@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/contexts/sidebar-context";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "./hooks/use-auth";
+import { useOnboarding } from "./hooks/use-onboarding";
 import { CURRENT_THEME } from "@shared/schema";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
@@ -24,12 +25,23 @@ import AccountSettings from "@/pages/account";
 import PasswordRecovery from "@/pages/password-recovery";
 import RemindersDashboard from "@/pages/reminders";
 import PlanManagement from "@/pages/plan-management";
+import EmailSent from "@/pages/email-sent";
+import VerificationSuccess from "@/pages/verification-success";
+import OnboardingProfile from "@/pages/onboarding-profile";
+import OnboardingPlans from "@/pages/onboarding-plans";
 import MainLayout from "@/components/layout/main-layout";
 
-function ProtectedRoute({ children, requiredRole, onNewOpportunity, onNewCompany }: { children: React.ReactNode; requiredRole?: string; onNewOpportunity?: () => void; onNewCompany?: () => void }) {
+function ProtectedRoute({ children, requiredRole, onNewOpportunity, onNewCompany, skipOnboarding = false }: { 
+  children: React.ReactNode; 
+  requiredRole?: string; 
+  onNewOpportunity?: () => void; 
+  onNewCompany?: () => void;
+  skipOnboarding?: boolean;
+}) {
   const { user, isLoading } = useAuth();
+  const { onboardingStatus, isLoading: onboardingLoading, needsProfile, needsPlan } = useOnboarding();
 
-  if (isLoading) {
+  if (isLoading || onboardingLoading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
@@ -52,6 +64,42 @@ function ProtectedRoute({ children, requiredRole, onNewOpportunity, onNewCompany
         </div>
       </div>
     );
+  }
+
+  // Check onboarding status (skip for certain routes)
+  if (!skipOnboarding && user.role !== 'SUPER_ADMIN') {
+    console.log("🔄 Checking onboarding for user:", user.name, user.role);
+    console.log("👤 Full user object:", user);
+    console.log("🔑 User businessAccountId:", user.businessAccountId);
+    console.log("📊 Onboarding status:", { onboardingStatus, needsProfile, needsPlan, onboardingLoading });
+    
+    if (onboardingStatus) {
+      const currentPath = window.location.pathname;
+      console.log("📍 Current path:", currentPath);
+      
+      // Don't redirect if already on onboarding pages
+      if (!currentPath.startsWith('/onboarding/')) {
+        if (needsProfile) {
+          console.log("🚀 Redirecting to profile setup...");
+          window.location.href = '/onboarding/profile';
+          return null;
+        }
+        
+        if (needsPlan) {
+          console.log("🚀 Redirecting to plan selection...");
+          window.location.href = '/onboarding/plans';
+          return null;
+        }
+        
+        console.log("✅ Onboarding complete, proceeding to dashboard");
+      } else {
+        console.log("📝 Already on onboarding page");
+      }
+    } else {
+      console.log("⚠️ No onboarding status available");
+    }
+  } else {
+    console.log("⏭️ Skipping onboarding check:", { skipOnboarding, role: user.role });
   }
 
   return <MainLayout onNewOpportunity={onNewOpportunity} onNewCompany={onNewCompany}>{children}</MainLayout>;
@@ -81,6 +129,10 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/password-recovery" component={PasswordRecovery} />
+      <Route path="/email-sent" component={EmailSent} />
+      <Route path="/verification-success" component={VerificationSuccess} />
+      <Route path="/onboarding/profile" component={OnboardingProfile} />
+      <Route path="/onboarding/plans" component={OnboardingPlans} />
       <Route path="/">
         <DashboardRoute />
       </Route>

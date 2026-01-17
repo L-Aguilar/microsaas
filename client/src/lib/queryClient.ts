@@ -5,6 +5,19 @@ import { getStoredJwtToken } from "./auth";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    
+    // Handle 401 Unauthorized specifically
+    if (res.status === 401) {
+      console.log("🚨 401 Unauthorized - clearing auth state");
+      const { clearAuthStorage } = await import("./auth");
+      clearAuthStorage();
+      
+      // Dispatch custom event for auth error
+      window.dispatchEvent(new CustomEvent('auth-error', { 
+        detail: { status: 401, message: text }
+      }));
+    }
+    
     throw new Error(`${res.status}: ${text}`);
   }
 }
@@ -33,6 +46,7 @@ export async function apiRequest(
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
+    credentials: 'include', // Include cookies for session-based auth
   });
 
   await throwIfResNotOk(res);
@@ -58,6 +72,7 @@ export const getQueryFn: <T>(options: {
     
     const res = await fetch(fullUrl, {
       headers,
+      credentials: 'include', // Include cookies for session-based auth
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

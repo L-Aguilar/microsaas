@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
-import { verifyToken, extractTokenFromHeader } from '../utils/jwt.js';
+import { verifyToken, extractTokenFromHeader, revokeToken } from '../utils/jwt.js';
 import { storage } from '../storage.js';
+import { pool } from '../db.js';
+import rateLimit from 'express-rate-limit';
 
 // Extend Request interface to include user data
 declare global {
@@ -17,9 +19,18 @@ declare global {
   }
 }
 
+// Rate limiting for authentication attempts
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Maximum 10 authentication attempts per window per IP
+  message: { message: 'Too many authentication attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /**
- * JWT Authentication middleware
- * Replaces session-based authentication
+ * JWT Authentication middleware with enhanced security validation
+ * Replaces session-based authentication and implements RLS context
  */
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
@@ -39,11 +50,50 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
-    // Verify user still exists in database
+    // ENHANCED: Comprehensive user validation
     const user = await storage.getUser(payload.userId);
     if (!user) {
-      return res.status(401).json({ message: 'User not found' });
+      // User no longer exists (likely deleted)
+      console.log(`🚨 Authentication failed: User ${payload.userId} not found (account likely deleted)`);
+      revokeToken(token);
+      return res.status(401).json({ message: 'Account no longer exists' });
     }
+    
+    if (user.isDeleted || user.deletedAt) {
+      // User is soft-deleted
+      console.log(`🚨 Authentication failed: User ${payload.userId} is marked as deleted`);
+      revokeToken(token);
+      return res.status(401).json({ message: 'User account suspended' });
+    }
+
+    // ENHANCED: Verify business account is still active (if user has one)
+    if (user.businessAccountId) {
+      const businessAccount = await storage.getBusinessAccount(user.businessAccountId);
+      if (!businessAccount) {
+        console.log(`🚨 Authentication failed: Business account ${user.businessAccountId} not found (likely deleted)`);
+        revokeToken(token);
+        return res.status(401).json({ message: 'Business account no longer exists' });
+      }
+      
+      if (!businessAccount.isActive) {
+        console.log(`🚨 Authentication failed: Business account ${user.businessAccountId} is inactive`);
+        revokeToken(token);
+        return res.status(401).json({ message: 'Business account is inactive' });
+      }
+      
+      if (businessAccount.deletedAt) {
+        console.log(`🚨 Authentication failed: Business account ${user.businessAccountId} is deleted`);
+        revokeToken(token);
+        return res.status(401).json({ message: 'Business account has been deleted' });
+      }
+    }
+
+    // SECURITY: Set database session variables for Row Level Security
+    if (user.businessAccountId) {
+      await pool.query("SELECT set_config('app.current_business_account_id', $1, true)", [user.businessAccountId]);
+    }
+    await pool.query("SELECT set_config('app.user_role', $1, true)", [user.role]);
+    await pool.query("SELECT set_config('app.user_id', $1, true)", [user.id]);
 
     // Attach user info to request
     req.user = {
@@ -56,9 +106,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // For backward compatibility with existing code
     req.businessAccountId = user.businessAccountId || undefined;
 
+    // SECURITY: Log authentication event for audit
+    console.log(`Authentication successful: ${user.email} (${user.role}) from ${req.ip}`);
+
     next();
   } catch (error) {
     console.error('JWT Auth middleware error:', error);
+    // SECURITY: Log failed authentication attempts
+    console.error(`Authentication failed from ${req.ip}: ${error.message}`);
     return res.status(500).json({ message: 'Authentication error' });
   }
 }

@@ -1,20 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Edit, Trash2, Users, Building, Settings, Eye } from "lucide-react";
+import { Trash2, Users, Building, Settings, Eye } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import BusinessAccountForm from "@/components/forms/business-account-form";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,8 +46,6 @@ interface BusinessAccount {
 }
 
 export default function BusinessAccounts() {
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [editingAccount, setEditingAccount] = useState<BusinessAccount | null>(null);
   const [deletingAccount, setDeletingAccount] = useState<BusinessAccount | null>(null);
   
   const { toast } = useToast();
@@ -86,23 +76,6 @@ export default function BusinessAccounts() {
     },
   });
 
-  const handleCreateSuccess = () => {
-    setShowCreateDialog(false);
-    queryClient.invalidateQueries({ queryKey: ["/api/business-accounts"] });
-    toast({
-      title: "Cuenta creada",
-      description: "La cuenta de negocio ha sido creada exitosamente",
-    });
-  };
-
-  const handleEditSuccess = () => {
-    setEditingAccount(null);
-    queryClient.invalidateQueries({ queryKey: ["/api/business-accounts"] });
-    toast({
-      title: "Cuenta actualizada",
-      description: "La cuenta de negocio ha sido actualizada exitosamente",
-    });
-  };
 
   if (isLoading) {
     return (
@@ -131,14 +104,6 @@ export default function BusinessAccounts() {
             Gestiona todas las organizaciones de la plataforma
           </p>
         </div>
-        <Button
-          onClick={() => setShowCreateDialog(true)}
-          className="flex items-center gap-2"
-          data-testid="button-create-business-account"
-        >
-          <Plus className="h-4 w-4" />
-          Nueva Cuenta
-        </Button>
       </div>
 
       {/* Stats */}
@@ -273,14 +238,6 @@ export default function BusinessAccounts() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setEditingAccount(account)}
-                  data-testid={`button-edit-account-${account.id}`}
-                >
-                  <Edit className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
                   onClick={() => setDeletingAccount(account)}
                   className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                   data-testid={`button-delete-account-${account.id}`}
@@ -300,50 +257,12 @@ export default function BusinessAccounts() {
           <h3 className="text-lg font-medium text-gray-900 mb-2">
             No hay cuentas de negocio
           </h3>
-          <p className="text-gray-600 mb-4">
-            Comienza creando la primera cuenta de negocio para tus clientes
+          <p className="text-gray-600">
+            No hay cuentas de negocio registradas en la plataforma
           </p>
-          <Button onClick={() => setShowCreateDialog(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Crear Primera Cuenta
-          </Button>
         </Card>
       )}
 
-      {/* Create Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Nueva Cuenta de Negocio</DialogTitle>
-            <DialogDescription>
-              Crea una nueva organización para un cliente
-            </DialogDescription>
-          </DialogHeader>
-          <BusinessAccountForm
-            onSuccess={handleCreateSuccess}
-            onCancel={() => setShowCreateDialog(false)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Dialog */}
-      <Dialog open={!!editingAccount} onOpenChange={() => setEditingAccount(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Editar Cuenta de Negocio</DialogTitle>
-            <DialogDescription>
-              Modifica la información de la organización
-            </DialogDescription>
-          </DialogHeader>
-          {editingAccount && (
-            <BusinessAccountForm
-              initialData={editingAccount}
-              onSuccess={handleEditSuccess}
-              onCancel={() => setEditingAccount(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!deletingAccount} onOpenChange={() => setDeletingAccount(null)}>

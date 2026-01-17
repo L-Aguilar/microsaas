@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type UpdateUser, type Company, type InsertCompany, type UpdateCompany, type Opportunity, type InsertOpportunity, type UpdateOpportunity, type Activity, type InsertActivity, type OpportunityWithRelations, type CompanyWithRelations, type ActivityWithRelations, type Module, type InsertModule, type BusinessAccount, type InsertBusinessAccount, type BusinessAccountModule, type InsertBusinessAccountModule, type ModuleWithStatus, type BusinessAccountWithRelations, type UserWithBusinessAccount, type Plan, type InsertPlan, type Product, type InsertProduct, type PlanModule, type InsertPlanModule, type BusinessAccountPlan, type InsertBusinessAccountPlan, type BusinessAccountProduct, type InsertBusinessAccountProduct, type PlanUsage, type InsertPlanUsage, type PlanWithModules, type BusinessAccountPlanWithRelations, AVAILABLE_MODULES } from "@shared/schema";
+import { type User, type InsertUser, type UpdateUser, type Company, type InsertCompany, type UpdateCompany, type Opportunity, type InsertOpportunity, type UpdateOpportunity, type Activity, type InsertActivity, type OpportunityWithRelations, type CompanyWithRelations, type ActivityWithRelations, type Module, type InsertModule, type BusinessAccount, type InsertBusinessAccount, type ModuleWithStatus, type BusinessAccountWithRelations, type UserWithBusinessAccount, type Plan, type InsertPlan, type Product, type InsertProduct, type PlanModule, type InsertPlanModule, type BusinessAccountPlan, type InsertBusinessAccountPlan, type BusinessAccountProduct, type InsertBusinessAccountProduct, type PlanUsage, type InsertPlanUsage, type PlanWithModules, type BusinessAccountPlanWithRelations, AVAILABLE_MODULES } from "@shared/schema";
 import { pool } from "./db";
 import { randomUUID } from "crypto";
 
@@ -43,12 +43,10 @@ export interface IStorage {
   getActivitiesByOpportunity(opportunityId: string): Promise<ActivityWithRelations[]>;
   createActivity(activity: InsertActivity): Promise<Activity>;
 
-  // Modules (global and business account specific)
+  // Modules (global - business account modules now calculated from plans)
   getModules(): Promise<Module[]>;
-  getBusinessAccountModules(businessAccountId: string): Promise<ModuleWithStatus[]>;
-  enableModuleForBusinessAccount(businessAccountId: string, moduleId: string, enabledBy: string): Promise<boolean>;
-  disableModuleForBusinessAccount(businessAccountId: string, moduleId: string): Promise<boolean>;
-  hasModuleEnabled(businessAccountId: string, moduleType: string): Promise<boolean>;
+  // REMOVED: getBusinessAccountModules, enableModuleForBusinessAccount, disableModuleForBusinessAccount, hasModuleEnabled
+  // Modules are now automatically determined from business_account_plans → plan_modules
 
   // SaaS Plans Management
   getPlans(): Promise<Plan[]>;
@@ -105,7 +103,7 @@ export class MemStorage {
   private activities: Map<string, Activity>;
   private modules: Map<string, Module>;
   private businessAccounts: Map<string, BusinessAccount>;
-  private businessAccountModules: Map<string, BusinessAccountModule>;
+  // REMOVED: private businessAccountModules: Map<string, BusinessAccountModule>;
 
   constructor() {
     this.users = new Map();
@@ -114,7 +112,6 @@ export class MemStorage {
     this.activities = new Map();
     this.modules = new Map();
     this.businessAccounts = new Map();
-    this.businessAccountModules = new Map();
 
     // Initialize with sample data
     this.initializeSampleData();
@@ -162,7 +159,7 @@ export class MemStorage {
         contactEmail: null, // Add missing property
         contactName: null, // Add missing property
         contactPhone: null, // Add missing property
-        modules: await this.getBusinessAccountModules(account.id),
+        modules: [], // REMOVED: business_account_modules now calculated from plans
         users: Array.from(this.users.values()).filter(user => user.businessAccountId === account.id),
         companies: Array.from(this.companies.values()).filter(company => company.businessAccountId === account.id),
       }))
@@ -179,7 +176,7 @@ export class MemStorage {
       contactEmail: null, // Add missing property
       contactName: null, // Add missing property
       contactPhone: null, // Add missing property
-      modules: await this.getBusinessAccountModules(account.id),
+      modules: [], // REMOVED: business_account_modules now calculated from plans
       users: Array.from(this.users.values()).filter(user => user.businessAccountId === account.id),
       companies: Array.from(this.companies.values()).filter(company => company.businessAccountId === account.id),
     };
@@ -189,7 +186,7 @@ export class MemStorage {
     const account: BusinessAccount = {
       id: randomUUID(),
       ...accountData,
-      plan: accountData.plan || 'BUSINESS_PLAN',
+      plan: accountData.plan || 'BUSINESS_ADMIN',
       isActive: accountData.isActive ?? true,
       deletedAt: accountData.deletedAt || null,
       createdAt: new Date(),
@@ -530,95 +527,34 @@ export class MemStorage {
     return Array.from(this.modules.values());
   }
 
-  async getBusinessAccountModules(businessAccountId: string): Promise<ModuleWithStatus[]> {
-    const businessAccountModules = Array.from(this.businessAccountModules.values())
-      .filter(bam => bam.businessAccountId === businessAccountId);
-    
-    return businessAccountModules.map(bam => {
-      const module = this.modules.get(bam.moduleId)!;
-      const enabledByUser = bam.enabledBy ? this.users.get(bam.enabledBy) : null;
-      
-      return {
-        ...module,
-        isEnabled: bam.isEnabled,
-        enabledAt: bam.enabledAt,
-        enabledBy: enabledByUser,
-      };
-    });
-  }
+  // REMOVED: getBusinessAccountModules - modules now calculated from plans
 
-  async enableModuleForBusinessAccount(businessAccountId: string, moduleId: string, enabledBy: string): Promise<boolean> {
-    // Check if relation already exists
-    const existing = Array.from(this.businessAccountModules.values())
-      .find(bam => bam.businessAccountId === businessAccountId && bam.moduleId === moduleId);
-    
-    if (existing) {
-      existing.isEnabled = true;
-      existing.enabledAt = new Date();
-      existing.enabledBy = enabledBy;
-      return true;
-    }
+  // REMOVED: enableModuleForBusinessAccount - modules now calculated from plans
 
-    // Create new relation
-    const businessAccountModule: BusinessAccountModule = {
-      id: randomUUID(),
-      businessAccountId,
-      moduleId,
-      isEnabled: true,
-      enabledAt: new Date(),
-      enabledBy,
-    };
-    this.businessAccountModules.set(businessAccountModule.id, businessAccountModule);
-    return true;
-  }
+  // REMOVED: disableModuleForBusinessAccount - modules now calculated from plans
 
-  async disableModuleForBusinessAccount(businessAccountId: string, moduleId: string): Promise<boolean> {
-    const existing = Array.from(this.businessAccountModules.values())
-      .find(bam => bam.businessAccountId === businessAccountId && bam.moduleId === moduleId);
-    
-    if (existing) {
-      existing.isEnabled = false;
-      return true;
-    }
-    return false;
-  }
-
-  async hasModuleEnabled(businessAccountId: string, moduleType: string): Promise<boolean> {
-    const module = Array.from(this.modules.values()).find(m => m.type === moduleType);
-    if (!module) return false;
-
-    const businessAccountModule = Array.from(this.businessAccountModules.values())
-      .find(bam => bam.businessAccountId === businessAccountId && bam.moduleId === module.id);
-    
-    return businessAccountModule?.isEnabled || false;
-  }
+  // REMOVED: hasModuleEnabled - modules now calculated from plans
 
   // Legacy methods for backward compatibility
   async getCompanyModules(companyId: string): Promise<ModuleWithStatus[]> {
-    const company = this.companies.get(companyId);
-    if (!company) return [];
-    
-    return this.getBusinessAccountModules(company.businessAccountId);
+    // REMOVED: business_account_modules - now calculated from plans
+    return [];
   }
 
   async enableModuleForCompany(companyId: string, moduleId: string, enabledBy: string): Promise<boolean> {
-    const company = this.companies.get(companyId);
-    if (!company) return false;
-    
-    return this.enableModuleForBusinessAccount(company.businessAccountId, moduleId, enabledBy);
+    // REMOVED: business_account_modules - now calculated from plans
+    return false;
   }
 
   async disableModuleForCompany(companyId: string, moduleId: string): Promise<boolean> {
-    const company = this.companies.get(companyId);
-    if (!company) return false;
-    
-    return this.disableModuleForBusinessAccount(company.businessAccountId, moduleId);
+    // REMOVED: business_account_modules - now calculated from plans
+    return false;
   }
 }
 
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
-import { users, companies, opportunities, activities, modules, businessAccounts, businessAccountModules } from "@shared/schema";
+import { users, companies, opportunities, activities, modules, businessAccounts } from "@shared/schema";
 
 export class DatabaseStorage implements IStorage {
   // Business Accounts methods
@@ -638,7 +574,7 @@ export class DatabaseStorage implements IStorage {
         u.name as contact_name,
         u.phone as contact_phone
       FROM business_accounts ba
-      LEFT JOIN users u ON ba.id = u.business_account_id AND u.role = 'BUSINESS_PLAN'
+      LEFT JOIN users u ON ba.id = u.business_account_id AND u.role = 'BUSINESS_ADMIN'
       WHERE ba.deleted_at IS NULL
       ORDER BY ba.created_at DESC;
     `);
@@ -660,7 +596,7 @@ export class DatabaseStorage implements IStorage {
           contactEmail: row.contact_email || null,
           contactName: row.contact_name || null,
           contactPhone: row.contact_phone || null,
-          modules: await this.getBusinessAccountModules(account.id),
+          modules: [], // REMOVED: business_account_modules now calculated from plans
           users: await this.getUsers(account.id),
           companies: await this.getCompanies(account.id),
         };
@@ -685,7 +621,7 @@ export class DatabaseStorage implements IStorage {
         u.name as contact_name,
         u.phone as contact_phone
       FROM business_accounts ba
-      LEFT JOIN users u ON ba.id = u.business_account_id AND u.role = 'BUSINESS_PLAN'
+      LEFT JOIN users u ON ba.id = u.business_account_id AND u.role = 'BUSINESS_ADMIN'
       WHERE ba.id = $1 AND ba.deleted_at IS NULL;
     `, [id]);
     
@@ -707,7 +643,7 @@ export class DatabaseStorage implements IStorage {
       contactEmail: row.contact_email || null,
       contactName: row.contact_name || null,
       contactPhone: row.contact_phone || null,
-      modules: await this.getBusinessAccountModules(account.id),
+      modules: [], // REMOVED: business_account_modules now calculated from plans
       users: await this.getUsers(account.id),
       companies: await this.getCompanies(account.id),
     };
@@ -721,7 +657,7 @@ export class DatabaseStorage implements IStorage {
       RETURNING id, name, plan, is_active, deleted_at, created_at, updated_at;
     `, [
       accountData.name,
-      accountData.plan || 'BUSINESS_PLAN',
+      accountData.plan || 'BUSINESS_ADMIN',
       accountData.isActive ?? true
     ]);
     
@@ -746,7 +682,7 @@ export class DatabaseStorage implements IStorage {
       email: (accountData as any).contactEmail || `admin@${account.name.toLowerCase().replace(/\s+/g, '')}.com`,
       phone: (accountData as any).contactPhone || null,
       password: hashedPassword,
-      role: 'BUSINESS_PLAN' as const,
+      role: 'BUSINESS_ADMIN' as const,
       businessAccountId: account.id
     };
     
@@ -866,7 +802,7 @@ export class DatabaseStorage implements IStorage {
         const userUpdateQuery = `
           UPDATE users 
           SET ${userFields.join(', ')}
-          WHERE business_account_id = $${userParamCount} AND role = 'BUSINESS_PLAN'
+          WHERE business_account_id = $${userParamCount} AND role = 'BUSINESS_ADMIN'
         `;
         
         const userResult = await client.query(userUpdateQuery, userValues);
@@ -914,6 +850,9 @@ export class DatabaseStorage implements IStorage {
   // Users methods
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    if (!user) {
+      console.log(`🔍 getUser: User ${id} not found in database`);
+    }
     return user;
   }
 
@@ -927,18 +866,23 @@ export class DatabaseStorage implements IStorage {
     if (result.rows.length === 0) return undefined;
     
     const row = result.rows[0];
-    return {
+    console.log('🔍 getUserByEmail row data:', row);
+    
+    const user = {
       id: row.id,
       name: row.name,
       email: row.email,
       phone: row.phone,
       password: row.password,
       role: row.role,
-      avatar: row.avatar,
+      avatar: null, // avatar field not in DB yet
       businessAccountId: row.business_account_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };
+    
+    console.log('✅ Mapped user object:', { ...user, password: '***' });
+    return user;
   }
 
   async createUser(userData: InsertUser): Promise<User> {
@@ -1393,112 +1337,28 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(modules);
   }
 
-  async getBusinessAccountModules(businessAccountId: string): Promise<ModuleWithStatus[]> {
-    const businessAccountModulesArray = await db.select()
-      .from(businessAccountModules)
-      .where(eq(businessAccountModules.businessAccountId, businessAccountId));
-    
-    const modulesWithStatus = await Promise.all(
-      businessAccountModulesArray.map(async bam => {
-        const [module] = await db.select().from(modules).where(eq(modules.id, bam.moduleId));
-        const enabledByUser = bam.enabledBy ? await this.getUser(bam.enabledBy) : null;
-        
-        return {
-          ...module,
-          isEnabled: bam.isEnabled,
-          enabledAt: bam.enabledAt,
-          enabledBy: enabledByUser,
-        };
-      })
-    );
-    
-    return modulesWithStatus;
-  }
+  // REMOVED: getBusinessAccountModules - modules now calculated from plans
 
-  async enableModuleForBusinessAccount(businessAccountId: string, moduleId: string, enabledBy: string): Promise<boolean> {
-    try {
-      // Check if relation already exists
-      const [existing] = await db.select()
-        .from(businessAccountModules)
-        .where(and(
-          eq(businessAccountModules.businessAccountId, businessAccountId),
-          eq(businessAccountModules.moduleId, moduleId)
-        ));
-      
-      if (existing) {
-        // Use raw SQL for reliability
-        await pool.query(`
-          UPDATE business_account_modules 
-          SET is_enabled = true, enabled_at = NOW(), enabled_by = $1 
-          WHERE id = $2
-        `, [enabledBy, existing.id]);
-        console.log('Updated existing module assignment:', { businessAccountId, moduleId, enabledBy });
-      } else {
-        await db.insert(businessAccountModules).values({
-          businessAccountId,
-          moduleId,
-          isEnabled: true,
-          enabledAt: new Date(),
-          enabledBy,
-        });
-      }
-      
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
+  // REMOVED: enableModuleForBusinessAccount - modules now calculated from plans
 
-  async disableModuleForBusinessAccount(businessAccountId: string, moduleId: string): Promise<boolean> {
-    try {
-      // Use raw SQL for reliability
-      const result = await pool.query(`
-        UPDATE business_account_modules 
-        SET is_enabled = false 
-        WHERE business_account_id = $1 AND module_id = $2
-      `, [businessAccountId, moduleId]);
-      console.log('Disabled module:', { businessAccountId, moduleId, rowsAffected: result.rowCount });
-      return true;
-    } catch (error) {
-      console.error('Error disabling module:', error);
-      return false;
-    }
-  }
+  // REMOVED: disableModuleForBusinessAccount - modules now calculated from plans
 
-  async hasModuleEnabled(businessAccountId: string, moduleType: string): Promise<boolean> {
-    const [module] = await db.select().from(modules).where(eq(modules.type, moduleType as any));
-    if (!module) return false;
-    
-    const [businessAccountModule] = await db.select()
-      .from(businessAccountModules)
-      .where(and(
-        eq(businessAccountModules.businessAccountId, businessAccountId),
-        eq(businessAccountModules.moduleId, module.id)
-      ));
-    
-    return businessAccountModule?.isEnabled || false;
-  }
+  // REMOVED: hasModuleEnabled - modules now calculated from plans
 
   // Legacy methods for backward compatibility
   async getCompanyModules(companyId: string): Promise<ModuleWithStatus[]> {
-    const company = await this.getCompany(companyId);
-    if (!company) return [];
-    
-    return this.getBusinessAccountModules(company.businessAccountId);
+    // REMOVED: business_account_modules - now calculated from plans
+    return [];
   }
 
   async enableModuleForCompany(companyId: string, moduleId: string, enabledBy: string): Promise<boolean> {
-    const company = await this.getCompany(companyId);
-    if (!company) return false;
-    
-    return this.enableModuleForBusinessAccount(company.businessAccountId, moduleId, enabledBy);
+    // REMOVED: business_account_modules - now calculated from plans
+    return false;
   }
 
   async disableModuleForCompany(companyId: string, moduleId: string): Promise<boolean> {
-    const company = await this.getCompany(companyId);
-    if (!company) return false;
-    
-    return this.disableModuleForBusinessAccount(company.businessAccountId, moduleId);
+    // REMOVED: business_account_modules - now calculated from plans
+    return false;
   }
 
   // Initialize database with essential data
@@ -1784,7 +1644,14 @@ export class DatabaseStorage implements IStorage {
   async getPlanModules(planId: string): Promise<PlanModule[]> {
     const query = `SELECT * FROM plan_modules WHERE plan_id = $1`;
     const result = await pool.query(query, [planId]);
-    return result.rows;
+    return result.rows.map(row => ({
+      id: row.id,
+      planId: row.plan_id,
+      moduleType: row.module_type,
+      isIncluded: row.is_included,
+      itemLimit: row.item_limit,
+      features: row.features
+    }));
   }
 
   async deletePlanModules(planId: string): Promise<void> {
@@ -1794,13 +1661,13 @@ export class DatabaseStorage implements IStorage {
 
   async createPlanModule(planModule: InsertPlanModule): Promise<PlanModule> {
     const query = `
-      INSERT INTO plan_modules (plan_id, module_type, is_included, item_limit, can_create, can_edit, can_delete, features)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO plan_modules (plan_id, module_type, is_included, item_limit, features)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
     const values = [
       planModule.planId, planModule.moduleType, planModule.isIncluded, planModule.itemLimit,
-      planModule.canCreate, planModule.canEdit, planModule.canDelete, planModule.features
+      planModule.features
     ];
     const result = await pool.query(query, values);
     return result.rows[0];
@@ -1849,7 +1716,7 @@ export class DatabaseStorage implements IStorage {
       SELECT 
         bap.*,
         p.*,
-        pm.id as pm_id, pm.module_type, pm.is_included, pm.item_limit, pm.can_create, pm.can_edit, pm.can_delete, pm.features as pm_features
+        pm.id as pm_id, pm.module_type, pm.is_included, pm.item_limit, pm.features as pm_features
       FROM business_account_plans bap
       INNER JOIN plans p ON bap.plan_id = p.id
       LEFT JOIN plan_modules pm ON p.id = pm.plan_id
@@ -1889,9 +1756,6 @@ export class DatabaseStorage implements IStorage {
         moduleType: row.module_type,
         isIncluded: row.is_included,
         itemLimit: row.item_limit,
-        canCreate: row.can_create,
-        canEdit: row.can_edit,
-        canDelete: row.can_delete,
         features: row.pm_features
       }));
 

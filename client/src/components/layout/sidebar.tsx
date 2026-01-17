@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { getCurrentThemeConfig } from "@shared/schema";
 
-const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCompanies: boolean, canViewCRM: boolean, canViewReports: boolean) => {
+const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCompanies: boolean, canViewCRM: boolean) => {
   const baseNavigation = [
     { name: "Dashboard", href: "/", icon: ChartPie },
   ];
@@ -23,11 +23,11 @@ const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCo
     return baseNavigation;
   }
 
-  // For BUSINESS_PLAN and USER roles - Module-based navigation
+  // For BUSINESS_ADMIN and USER roles - Module-based navigation
   // Only show features if user has permissions to view the respective modules
   
-  // Users module (only for BUSINESS_PLAN)
-  if (userRole === 'BUSINESS_PLAN' && canViewUsers) {
+  // Users module (only for BUSINESS_ADMIN)
+  if (userRole === 'BUSINESS_ADMIN' && canViewUsers) {
     baseNavigation.push(
       { name: "Usuarios", href: "/users", icon: Users }
     );
@@ -36,7 +36,7 @@ const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCo
   // Companies module
   if (canViewCompanies) {
     baseNavigation.push(
-      { name: "Empresas", href: "/companies", icon: Building }
+      { name: "Contactos", href: "/companies", icon: Building }
     );
   }
 
@@ -47,14 +47,8 @@ const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCo
     );
   }
 
-  // Reports module
-  if (canViewReports) {
-    baseNavigation.push(
-      { name: "Reportes", href: "/reports", icon: BarChart3 }
-    );
-  }
 
-  // Remove modules management from BUSINESS_PLAN sidebar
+  // Remove modules management from BUSINESS_ADMIN sidebar
 
   return baseNavigation;
 };
@@ -64,9 +58,8 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const { isCollapsed, isMobile, isOpen, toggleSidebar, closeSidebar } = useSidebar();
   const { canView: canViewUsers } = useModulePermissions('USERS');
-  const { canView: canViewCompanies } = useModulePermissions('COMPANIES');
+  const { canView: canViewCompanies } = useModulePermissions('CONTACTS');
   const { canView: canViewCRM } = useModulePermissions('CRM');
-  const { canView: canViewReports } = useModulePermissions('REPORTS');
   const themeConfig = getCurrentThemeConfig();
 
   const handleLogout = () => {
@@ -116,7 +109,7 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 px-2 py-8 space-y-1">
-          {getNavigationForRole(user.role, canViewUsers, canViewCompanies, canViewCRM, canViewReports).map((item) => {
+          {getNavigationForRole(user.role, canViewUsers, canViewCompanies, canViewCRM).map((item) => {
             const isActive = location === item.href;
             const Icon = item.icon;
             

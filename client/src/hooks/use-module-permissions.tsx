@@ -27,12 +27,27 @@ export function useModulePermissions(moduleType: string) {
       });
       
       if (!response.ok) {
+        // Handle authentication errors gracefully
+        if (response.status === 401) {
+          console.log("🚨 Module permissions: 401 unauthorized, token may be expired");
+          throw new Error('Authentication required');
+        }
         throw new Error('Failed to fetch module permissions');
       }
       
-      return response.json();
+      const data = await response.json();
+      console.log(`📊 Module permissions for ${moduleType}:`, data);
+      return data;
     },
     enabled: !!user?.businessAccountId && user?.role !== 'SUPER_ADMIN',
+    staleTime: 60000, // Cache for 1 minute
+    retry: (failureCount, error) => {
+      // Don't retry on auth errors
+      if (error.message.includes('Authentication required')) {
+        return false;
+      }
+      return failureCount < 2;
+    },
     // Super Admin has all permissions by default
     placeholderData: user?.role === 'SUPER_ADMIN' ? {
       canCreate: true,

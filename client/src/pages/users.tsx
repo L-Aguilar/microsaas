@@ -4,13 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
-import { Plus, Users, Mail, Phone, Trash2, Edit, Eye, TrendingUp, Target, Activity, Award, BarChart3, ArrowRight } from "lucide-react";
+import { Plus, Users, Mail, Phone, Trash2, Edit, Eye, TrendingUp, Target, Activity, Award, BarChart3, ArrowRight, Shield } from "lucide-react";
 import { User, OpportunityWithRelations } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useModulePermissions } from "@/hooks/use-module-permissions";
 import UserForm from "@/components/forms/user-form";
+import UserPermissionsForm from "@/components/forms/user-permissions-form";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -59,6 +60,8 @@ export default function UsersPage() {
   const [viewingUserMetrics, setViewingUserMetrics] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [userForPermissions, setUserForPermissions] = useState<User | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
@@ -108,6 +111,11 @@ export default function UsersPage() {
     setViewingUserMetrics(userId);
   };
 
+  const handleManagePermissions = (user: User) => {
+    setUserForPermissions(user);
+    setShowPermissionsModal(true);
+  };
+
   const confirmDelete = () => {
     if (userToDelete) {
       deleteUserMutation.mutate(userToDelete.id);
@@ -119,7 +127,7 @@ export default function UsersPage() {
     switch (role) {
       case 'SUPER_ADMIN':
         return 'bg-red-100 text-red-800';
-      case 'BUSINESS_PLAN':
+      case 'BUSINESS_ADMIN':
         return 'bg-purple-100 text-purple-800';
       case 'USER':
         return 'bg-blue-100 text-blue-800';
@@ -132,7 +140,7 @@ export default function UsersPage() {
     switch (role) {
       case 'SUPER_ADMIN':
         return 'Super Admin';
-      case 'BUSINESS_PLAN':
+      case 'BUSINESS_ADMIN':
         return 'Admin Empresa';
       case 'USER':
         return 'Vendedor';
@@ -155,8 +163,8 @@ export default function UsersPage() {
     NOTE: "Nota",
   };
 
-  // Only SUPER_ADMIN and BUSINESS_PLAN can access user management
-  if (currentUser?.role !== 'BUSINESS_PLAN' && currentUser?.role !== 'SUPER_ADMIN') {
+  // Only SUPER_ADMIN and BUSINESS_ADMIN can access user management
+  if (currentUser?.role !== 'BUSINESS_ADMIN' && currentUser?.role !== 'SUPER_ADMIN') {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -233,6 +241,18 @@ export default function UsersPage() {
             <BarChart3 className="h-4 w-4 mr-1" />
             Métricas
           </Button>
+          {/* Show permissions button only for regular users, not for BUSINESS_ADMIN */}
+          {user.role === 'USER' && currentUser?.role === 'BUSINESS_ADMIN' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleManagePermissions(user)}
+              className="h-8"
+              title="Gestionar permisos del usuario"
+            >
+              <Shield className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -243,7 +263,7 @@ export default function UsersPage() {
           >
             <Edit className="h-4 w-4" />
           </Button>
-          {user.role !== 'BUSINESS_PLAN' && canDelete && (
+          {user.role !== 'BUSINESS_ADMIN' && canDelete && (
             <Button
               variant="outline"
               size="sm"
@@ -563,6 +583,21 @@ export default function UsersPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* User Permissions Modal */}
+      {userForPermissions && (
+        <UserPermissionsForm
+          user={userForPermissions}
+          isOpen={showPermissionsModal}
+          onClose={() => {
+            setShowPermissionsModal(false);
+            setUserForPermissions(null);
+          }}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+          }}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       <ConfirmationDialog

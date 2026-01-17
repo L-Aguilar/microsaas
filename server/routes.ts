@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import session from "express-session";
 import ConnectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
+import crypto from "crypto";
 import { insertUserSchema, updateUserSchema, insertCompanySchema, updateCompanySchema, insertOpportunitySchema, updateOpportunitySchema, insertActivitySchema, insertModuleSchema, insertBusinessAccountSchema, insertBusinessAccountModuleSchema, insertPlanSchema, insertProductSchema, insertPlanModuleSchema } from "@shared/schema";
 import { generateSecurePassword, generateAlphanumericPassword, hashPassword, verifyPassword } from "./utils/password";
 import bcrypt from "bcryptjs";
@@ -12,7 +13,7 @@ import { sendEmail, sendWelcomeEmail as sendBrevoWelcomeEmail } from "./services
 import { ReminderService } from "./services/reminderService";
 import { secureLog } from "./utils/secureLogger";
 import { generateToken } from "./utils/jwt.js";
-import { requireAuth, requireRole, requireSuperAdmin, requireBusinessAccount } from "./middleware/jwtAuth.js";
+import { requireAuth, requireRole, requireSuperAdmin, requireBusinessAccount, authLimiter } from "./middleware/jwtAuth.js";
 import { checkPlanLimits, attachModulePermissions, updateUsageAfterAction } from "./middleware/planLimitsMiddleware";
 import { planService } from "./services/planService";
 import { z } from "zod";
@@ -161,6 +162,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Add missing columns to users table
+  app.post("/api/migrate-users-table", async (req, res) => {
+    try {
+      // Add missing columns to existing users table
+      await pool.query(`
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS phone VARCHAR,
+        ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false;
+      `);
+      
+      res.json({ message: "Users table migration completed successfully", status: "success" });
+    } catch (error) {
+      console.error("Migration error:", error);
+      res.status(500).json({ message: "Migration failed", error: (error as Error).message });
+    }
+  });
+
   // Auto-setup database tables (run migration)
   app.post("/api/setup-database", async (req, res) => {
     try {
@@ -201,6 +220,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           password VARCHAR NOT NULL,
           role VARCHAR NOT NULL DEFAULT 'USER',
           business_account_id VARCHAR REFERENCES business_accounts(id),
+          phone VARCHAR,
+          is_active BOOLEAN DEFAULT true,
+          email_verified BOOLEAN DEFAULT false,
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         );
@@ -256,6 +278,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updated_at TIMESTAMP DEFAULT NOW()
         );
 
+        CREATE TABLE IF NOT EXISTS pending_registrations (
+          id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          business_account_id VARCHAR NOT NULL REFERENCES business_accounts(id),
+          company_name VARCHAR NOT NULL,
+          responsible_name VARCHAR NOT NULL,
+          email VARCHAR UNIQUE NOT NULL,
+          phone VARCHAR NOT NULL,
+          verification_token VARCHAR NOT NULL,
+          token_expiry TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+
         -- Insertar módulos iniciales
         INSERT INTO modules (id, name, type, description) VALUES
         ('mod-users', 'Gestión de Usuarios', 'USERS', 'Permite gestionar usuarios del sistema'),
@@ -306,9 +340,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
   // Auth routes (JWT-based, no session middleware needed)
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", authLimiter, async (req, res) => {
     try {
       const { email, password } = loginSchema.parse(req.body);
       const user = await storage.getUserByEmail(email);
@@ -341,6 +374,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip: req.ip 
         });
         return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // ENHANCED: Verify business account is still active (if user has one)
+      if (user.businessAccountId) {
+        console.log(`🔍 LOGIN: Checking business account ${user.businessAccountId} for user ${user.email}`);
+        const businessAccount = await storage.getBusinessAccount(user.businessAccountId);
+        console.log(`🔍 LOGIN: getBusinessAccount returned:`, businessAccount ? 'FOUND' : 'NOT FOUND');
+        
+        if (!businessAccount) {
+          console.log(`🚨 Login failed: Business account ${user.businessAccountId} not found (likely deleted)`);
+          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
+            email: user.email, 
+            reason: 'BUSINESS_ACCOUNT_DELETED',
+            businessAccountId: user.businessAccountId,
+            ip: req.ip 
+          });
+          return res.status(401).json({ 
+            message: "Esta organización ya no existe. Contacta al administrador si necesitas acceso" 
+          });
+        }
+        
+        if (!businessAccount.isActive) {
+          console.log(`🚨 Login failed: Business account ${user.businessAccountId} is inactive`);
+          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
+            email: user.email, 
+            reason: 'BUSINESS_ACCOUNT_INACTIVE',
+            businessAccountId: user.businessAccountId,
+            ip: req.ip 
+          });
+          return res.status(401).json({ 
+            message: "Esta organización está inactiva. Contacta al administrador" 
+          });
+        }
+        
+        if (businessAccount.deletedAt) {
+          console.log(`🚨 Login failed: Business account ${user.businessAccountId} is soft-deleted`);
+          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
+            email: user.email, 
+            reason: 'BUSINESS_ACCOUNT_SOFT_DELETED',
+            businessAccountId: user.businessAccountId,
+            ip: req.ip 
+          });
+          return res.status(401).json({ 
+            message: "Esta organización ha sido eliminada. Contacta al administrador si necesitas acceso" 
+          });
+        }
       }
 
       // Generate JWT token instead of session
@@ -380,6 +459,357 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get current user (JWT-protected)
   app.get("/api/auth/user", requireAuth, async (req, res) => {
     res.json({ ...req.user, password: undefined });
+  });
+
+  // Registration endpoint
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { companyName, responsibleName, email, phone } = req.body;
+      
+      // Validate required fields
+      if (!companyName || !responsibleName || !email || !phone) {
+        return res.status(400).json({ 
+          message: "All fields are required", 
+          fields: { companyName, responsibleName, email, phone } 
+        });
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Invalid email format" });
+      }
+
+      // Check if email already exists and analyze the situation
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        console.log(`📧 REGISTER: Found existing user with email ${email}`);
+        console.log(`👤 REGISTER: User role: ${existingUser.role}, deleted: ${existingUser.isDeleted || existingUser.deletedAt ? 'YES' : 'NO'}`);
+        
+        // If user is marked as deleted, hide that information for security
+        if (existingUser.isDeleted || existingUser.deletedAt) {
+          console.log(`🚨 REGISTER: User ${email} is deleted, returning generic error`);
+          return res.status(401).json({ message: "Credenciales incorrectas" });
+        }
+        
+        // Check business account status if user has one
+        if (existingUser.businessAccountId) {
+          console.log(`🔍 REGISTER: Checking business account ${existingUser.businessAccountId}`);
+          const businessAccount = await storage.getBusinessAccount(existingUser.businessAccountId);
+          
+          if (!businessAccount || businessAccount.deletedAt) {
+            console.log(`🏢 REGISTER: Business account is deleted/missing`);
+            
+            // Only BUSINESS_ADMIN can reactivate their company
+            if (existingUser.role === 'BUSINESS_ADMIN') {
+              console.log(`✅ REGISTER: BUSINESS_ADMIN can reactivate account`);
+              return res.status(422).json({ 
+                message: "Tu empresa fue eliminada. ¿Deseas reactivar tu cuenta?",
+                canReactivate: true,
+                userId: existingUser.id,
+                companyName: businessAccount?.name || 'Empresa anterior'
+              });
+            } else {
+              console.log(`❌ REGISTER: USER role cannot reactivate, must contact admin`);
+              return res.status(403).json({ 
+                message: "Esta empresa ya no está activa. Contacta al administrador" 
+              });
+            }
+          } else if (!businessAccount.isActive) {
+            console.log(`🏢 REGISTER: Business account is inactive`);
+            return res.status(403).json({ 
+              message: "Esta empresa está inactiva. Contacta al administrador" 
+            });
+          } else {
+            // Business account is active, user should login instead
+            console.log(`✅ REGISTER: User and business account are active`);
+            return res.status(409).json({ 
+              message: "Email ya registrado. Inicia sesión con tu cuenta existente" 
+            });
+          }
+        } else {
+          // User exists but has no business account (shouldn't happen for non-SUPER_ADMIN)
+          console.log(`⚠️ REGISTER: User exists but has no business account`);
+          return res.status(409).json({ 
+            message: "Email ya registrado. Inicia sesión con tu cuenta existente" 
+          });
+        }
+      }
+
+      // Generate temporary password
+      const tempPassword = crypto.randomBytes(6).toString('base64').slice(0, 12);
+
+      // Create business account
+      const businessAccount = await storage.createBusinessAccount({
+        name: companyName
+      });
+
+      // Create admin user for the business account
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+      
+      await storage.createUser({
+        name: responsibleName,
+        email: email,
+        phone: phone,
+        password: hashedPassword,
+        role: 'BUSINESS_ADMIN',
+        businessAccountId: businessAccount.id
+      });
+
+      console.log(`✅ Business account created: ${companyName} (ID: ${businessAccount.id})`);
+      console.log(`✅ User created: ${responsibleName} (${email}) with temp password: ${tempPassword}`);
+
+      // Send welcome email with Brevo template
+      let emailSent = false;
+      
+      // Try Brevo template first
+      if (process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.includes('xxxxxxxx')) {
+        try {
+          const { sendBusinessWelcomeTemplate } = await import('./services/brevoTemplateService');
+          
+          emailSent = await sendBusinessWelcomeTemplate({
+            to: email,
+            companyName: companyName,
+            responsibleName: responsibleName,
+            tempPassword: tempPassword
+          });
+          
+          if (emailSent) {
+            console.log(`✅ Welcome email sent via Brevo template to ${email}`);
+          }
+        } catch (error) {
+          console.error('❌ Brevo template failed:', error);
+        }
+      }
+
+      if (!emailSent) {
+        // If template fails, send basic email fallback
+        console.log('📧 Falling back to basic email...');
+        const { sendEmail } = await import('./services/emailService');
+        
+        emailSent = await sendEmail({
+          to: email,
+          toName: responsibleName,
+          from: process.env.FROM_EMAIL || 'noreply@controly.co',
+          fromName: process.env.FROM_NAME || 'Controly',
+          subject: '¡Bienvenido a Controly! - Tu cuenta está lista',
+          htmlContent: `
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif;">
+              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1>¡Bienvenido a Controly!</h1>
+                <p>Tu cuenta está lista para usar</p>
+              </div>
+              <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                <h2>¡Hola ${responsibleName}!</h2>
+                <p>¡Gracias por registrar <strong>${companyName}</strong> en Controly!</p>
+                <p>Tu cuenta ha sido creada exitosamente. Aquí están tus credenciales de acceso:</p>
+                
+                <div style="background: #fff; border: 2px solid #667eea; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+                  <p><strong>Email:</strong> ${email}</p>
+                  <p><strong>Contraseña temporal:</strong> <span style="font-size: 18px; font-weight: bold; color: #667eea;">${tempPassword}</span></p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${process.env.BASE_URL || 'http://localhost:5173'}" style="background-color: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                    Iniciar Sesión
+                  </a>
+                </div>
+                
+                <p style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin: 20px 0;">
+                  <strong>⚠️ Importante:</strong> Te recomendamos cambiar esta contraseña después de tu primer inicio de sesión por seguridad.
+                </p>
+                
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+                <p style="color: #666; font-size: 14px;">
+                  Si necesitas ayuda, contáctanos en <a href="mailto:hello@controly.co">hello@controly.co</a>
+                </p>
+              </div>
+            </div>
+          `,
+          textContent: `
+            ¡Bienvenido a Controly!
+            
+            Hola ${responsibleName},
+            
+            ¡Gracias por registrar ${companyName} en Controly!
+            Tu cuenta ha sido creada exitosamente.
+            
+            Credenciales de acceso:
+            Email: ${email}
+            Contraseña temporal: ${tempPassword}
+            
+            Inicia sesión en: ${process.env.BASE_URL || 'http://localhost:5173'}
+            
+            IMPORTANTE: Te recomendamos cambiar esta contraseña después de tu primer inicio de sesión por seguridad.
+            
+            Si necesitas ayuda, contáctanos en hello@controly.co
+          `
+        });
+      }
+
+      if (!emailSent) {
+        return res.status(500).json({ message: "Error sending welcome email" });
+      }
+
+      res.json({ 
+        message: "Registration successful! Check your email for login credentials.",
+        email: email,
+        company: companyName 
+      });
+
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ message: "Registration failed" });
+    }
+  });
+
+  // Email verification endpoint
+  app.get("/verify-email", async (req, res) => {
+    try {
+      const { token } = req.query;
+
+      if (!token) {
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1>Token de verificación requerido</h1>
+            <p>El enlace de verificación es inválido.</p>
+          </body></html>
+        `);
+      }
+
+      // Find pending registration
+      const pendingResult = await pool.query(`
+        SELECT pr.*, ba.id as business_account_id 
+        FROM pending_registrations pr
+        JOIN business_accounts ba ON pr.business_account_id = ba.id
+        WHERE pr.verification_token = $1 AND pr.token_expiry > NOW()
+      `, [token]);
+
+      if (pendingResult.rows.length === 0) {
+        return res.status(400).send(`
+          <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1>Enlace de verificación inválido o expirado</h1>
+            <p>El enlace de verificación ha expirado o no es válido. Por favor, intenta registrarte nuevamente.</p>
+            <a href="/login" style="background-color: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Volver al login</a>
+          </body></html>
+        `);
+      }
+
+      const pending = pendingResult.rows[0];
+
+      // Generate temporary password for first login
+      const tempPassword = generateAlphanumericPassword(12);
+      const { hashPassword } = await import('./utils/password');
+      const hashedPassword = hashPassword(tempPassword);
+
+      // Create user account
+      const userResult = await pool.query(`
+        INSERT INTO users (
+          business_account_id, name, email, password, role, 
+          phone, is_active, email_verified, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, 'BUSINESS_ADMIN', $5, true, true, NOW(), NOW())
+        RETURNING id
+      `, [
+        pending.business_account_id, 
+        pending.responsible_name, 
+        pending.email, 
+        hashedPassword,
+        pending.phone
+      ]);
+
+      // Assign default plan (free plan)
+      const defaultPlanResult = await pool.query(`
+        SELECT id FROM plans WHERE is_default = true AND status = 'ACTIVE' LIMIT 1
+      `);
+
+      if (defaultPlanResult.rows.length > 0) {
+        const planId = defaultPlanResult.rows[0].id;
+        await pool.query(`
+          INSERT INTO business_account_plans (business_account_id, plan_id, status, trial_ends_at, created_at, updated_at)
+          VALUES ($1, $2, 'TRIAL', NOW() + INTERVAL '30 days', NOW(), NOW())
+        `, [pending.business_account_id, planId]);
+      }
+
+      // Remove pending registration
+      await pool.query('DELETE FROM pending_registrations WHERE verification_token = $1', [token]);
+
+      // Send welcome email with temporary password
+      const { sendEmail } = await import('./services/emailService');
+      await sendEmail({
+        to: pending.email,
+        toName: pending.responsible_name,
+        from: process.env.FROM_EMAIL || 'noreply@bizflowcrm.com',
+        fromName: process.env.FROM_NAME || 'BizFlowCRM',
+        subject: '¡Cuenta verificada! - Tu contraseña temporal',
+        htmlContent: `
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1>🎉 ¡Tu cuenta está lista!</h1>
+              <p>BizFlowCRM - ${pending.company_name}</p>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+              <h2>¡Hola ${pending.responsible_name}!</h2>
+              <p>Tu email ha sido verificado exitosamente. Tu cuenta en BizFlowCRM está lista para usar.</p>
+              
+              <div style="background: #fff; border: 2px solid #667eea; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+                <h3>Tu contraseña temporal:</h3>
+                <div style="font-size: 24px; font-weight: bold; color: #667eea; letter-spacing: 2px; margin: 10px 0;">
+                  ${tempPassword}
+                </div>
+              </div>
+              
+              <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin: 20px 0;">
+                <strong>⚠️ Importante:</strong>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                  <li>Esta es una contraseña temporal</li>
+                  <li>Cámbiala inmediatamente después de iniciar sesión</li>
+                  <li>No compartas esta contraseña con nadie</li>
+                </ul>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${process.env.BASE_URL || 'http://localhost:8080'}/login" style="background-color: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                  🚀 Iniciar Sesión
+                </a>
+              </div>
+              
+              <p>¡Bienvenido a BizFlowCRM! Estamos emocionados de ayudarte a hacer crecer tu negocio.</p>
+            </div>
+          </div>
+        `,
+        textContent: `
+          ¡Tu cuenta está lista!
+          
+          Hola ${pending.responsible_name},
+          
+          Tu email ha sido verificado exitosamente. Tu cuenta en BizFlowCRM está lista para usar.
+          
+          Tu contraseña temporal es: ${tempPassword}
+          
+          IMPORTANTE:
+          - Esta es una contraseña temporal
+          - Cámbiala inmediatamente después de iniciar sesión
+          - No compartas esta contraseña con nadie
+          
+          Inicia sesión en: ${process.env.BASE_URL || 'http://localhost:8080'}/login
+          
+          ¡Bienvenido a BizFlowCRM!
+        `
+      });
+
+      // Redirect to success page
+      res.redirect('/verification-success');
+
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(500).send(`
+        <html><body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1>Error de verificación</h1>
+          <p>Hubo un error al verificar tu email. Por favor, intenta nuevamente.</p>
+          <a href="/login" style="background-color: #667eea; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Volver al login</a>
+        </body></html>
+      `);
+    }
   });
 
   // Password recovery endpoint
@@ -524,6 +954,217 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reactivate business account for BUSINESS_ADMIN
+  app.post("/api/auth/reactivate-account", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+
+      console.log(`🔄 REACTIVATE: Attempting to reactivate account for user ${userId}`);
+
+      // Get user by ID
+      const user = await storage.getUser(userId);
+      if (!user) {
+        console.log(`❌ REACTIVATE: User ${userId} not found`);
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      console.log(`👤 REACTIVATE: Found user ${user.email}, role: ${user.role}`);
+
+      // Security: Only BUSINESS_ADMIN can reactivate
+      if (user.role !== 'BUSINESS_ADMIN') {
+        console.log(`🚨 REACTIVATE: User ${user.email} is not BUSINESS_ADMIN (${user.role})`);
+        return res.status(403).json({ message: "Solo los administradores pueden reactivar empresas" });
+      }
+
+      // User must have a business account ID
+      if (!user.businessAccountId) {
+        console.log(`❌ REACTIVATE: User ${user.email} has no business account ID`);
+        return res.status(400).json({ message: "Usuario no tiene empresa asociada" });
+      }
+
+      // Get business account (should exist but be soft-deleted)
+      const businessAccount = await storage.getBusinessAccount(user.businessAccountId);
+      
+      if (!businessAccount) {
+        console.log(`❌ REACTIVATE: Business account ${user.businessAccountId} not found (hard-deleted)`);
+        return res.status(404).json({ 
+          message: "La empresa no puede ser reactivada. Contacta al administrador" 
+        });
+      }
+
+      console.log(`🏢 REACTIVATE: Found business account ${businessAccount.name}, deletedAt: ${businessAccount.deletedAt ? 'YES' : 'NO'}, isActive: ${businessAccount.isActive}`);
+
+      // Check if business account is actually deleted
+      if (!businessAccount.deletedAt && businessAccount.isActive) {
+        console.log(`⚠️ REACTIVATE: Business account is already active`);
+        return res.status(400).json({ message: "La empresa ya está activa" });
+      }
+
+      // Reactivate the existing business account - restore to active status
+      const updatedAccount = await storage.updateBusinessAccount(user.businessAccountId, {
+        isActive: true,
+        deletedAt: null,
+        updatedAt: new Date()
+      });
+      
+      if (!updatedAccount) {
+        console.log(`❌ REACTIVATE: Failed to reactivate business account ${user.businessAccountId}`);
+        return res.status(500).json({ message: "Error al reactivar la empresa" });
+      }
+
+      console.log(`✅ REACTIVATE: Business account ${businessAccount.name} reactivated successfully`);
+
+      // Generate JWT token for immediate login (businessAccountId remains the same)
+      const token = generateToken(user);
+
+      // Return success with user data and token for immediate login
+      res.json({
+        message: `Empresa "${businessAccount.name}" reactivada exitosamente`,
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          businessAccountId: user.businessAccountId
+        },
+        businessAccount: {
+          id: businessAccount.id,
+          name: businessAccount.name
+        }
+      });
+
+    } catch (error) {
+      console.error("❌ Account reactivation error:", error);
+      res.status(500).json({ message: "Error interno del servidor" });
+    }
+  });
+
+  // TEMPORARY: Fix business account plan field
+  app.post("/api/debug/fix-plan", async (req, res) => {
+    try {
+      const { businessAccountId } = req.body;
+      
+      if (!businessAccountId) {
+        return res.status(400).json({ message: "businessAccountId required" });
+      }
+      
+      // Get the current plan from business_account_plans
+      const planResult = await pool.query(`
+        SELECT p.name, bap.plan_id 
+        FROM business_account_plans bap
+        JOIN plans p ON bap.plan_id = p.id
+        WHERE bap.business_account_id = $1 AND bap.status IN ('TRIAL', 'ACTIVE')
+        ORDER BY bap.created_at DESC
+        LIMIT 1
+      `, [businessAccountId]);
+      
+      if (planResult.rows.length === 0) {
+        return res.status(404).json({ message: "No active plan found for business account" });
+      }
+      
+      const planName = planResult.rows[0].name;
+      
+      // Update business account plan field
+      await pool.query(
+        'UPDATE business_accounts SET plan = $1, updated_at = NOW() WHERE id = $2',
+        [planName, businessAccountId]
+      );
+      
+      console.log(`🔧 Fixed business account plan: ${businessAccountId} -> ${planName}`);
+      
+      res.json({ 
+        message: "Business account plan field updated",
+        businessAccountId,
+        planName
+      });
+    } catch (error) {
+      console.error("Fix plan error:", error);
+      res.status(500).json({ message: "Error", error: error.message });
+    }
+  });
+
+  // TEMPORARY: Debug endpoint for permissions
+  app.get("/api/debug/permissions", async (req, res) => {
+    try {
+      const { businessAccountId, moduleType } = req.query as { businessAccountId: string; moduleType: string };
+      
+      if (!businessAccountId || !moduleType) {
+        return res.status(400).json({ message: "businessAccountId and moduleType required" });
+      }
+      
+      // Check business account
+      const baResult = await pool.query('SELECT * FROM business_accounts WHERE id = $1', [businessAccountId]);
+      console.log('🏢 Business Account:', baResult.rows[0]);
+      
+      // Check plan
+      const planResult = await pool.query('SELECT * FROM plans WHERE name = $1', [baResult.rows[0]?.plan]);
+      console.log('📋 Plan:', planResult.rows[0]);
+      
+      // Check plan modules
+      const planModulesResult = await pool.query(
+        'SELECT * FROM plan_modules WHERE plan_id = $1 AND module_type = $2', 
+        [planResult.rows[0]?.id, moduleType]
+      );
+      console.log('🔧 Plan Modules:', planModulesResult.rows);
+      
+      // The problematic query
+      const problemQuery = await pool.query(`
+        SELECT pm.*, p.name as plan_name, ba.plan as ba_plan
+        FROM business_accounts ba
+        JOIN plans p ON ba.plan = p.name
+        JOIN plan_modules pm ON p.id = pm.plan_id
+        WHERE ba.id = $1 AND pm.module_type = $2 AND pm.is_included = true
+      `, [businessAccountId, moduleType]);
+      
+      console.log('🔍 Problem Query Result:', problemQuery.rows);
+      
+      res.json({
+        businessAccount: baResult.rows[0],
+        plan: planResult.rows[0],
+        planModules: planModulesResult.rows,
+        problemQueryResult: problemQuery.rows
+      });
+    } catch (error) {
+      console.error("Debug permissions error:", error);
+      res.status(500).json({ message: "Error", error: error.message });
+    }
+  });
+
+  // TEMPORARY: Debug endpoint to delete user
+  app.delete("/api/debug/delete-user", async (req, res) => {
+    try {
+      const email = req.query.email as string;
+      if (!email) {
+        return res.status(400).json({ message: "Email required" });
+      }
+      
+      const result = await pool.query(
+        'DELETE FROM users WHERE email = $1 RETURNING id, email, name', 
+        [email]
+      );
+      
+      if (result.rows.length > 0) {
+        const deletedUser = result.rows[0];
+        console.log(`🗑️ Usuario eliminado: ${deletedUser.email}`);
+        res.json({ 
+          message: "Usuario eliminado", 
+          user: deletedUser 
+        });
+      } else {
+        res.status(404).json({ message: "Usuario no encontrado" });
+      }
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ message: "Error interno" });
+    }
+  });
+
 
   // Using imported JWT middleware instead of local session middleware
   
@@ -577,11 +1218,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Business account required" });
       }
       
-      const hasModule = await storage.hasModuleEnabled(user.businessAccountId, moduleType);
-      if (!hasModule) {
-        return res.status(403).json({ message: `Module ${moduleType} not enabled for your organization` });
+      // UPDATED: Use unified permission system instead of storage.hasModuleEnabled
+      try {
+        const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
+        const hasAccess = await unifiedPermissionService.hasModuleAccess(user.businessAccountId, moduleType);
+        
+        if (!hasAccess) {
+          return res.status(403).json({ message: `Module ${moduleType} not enabled for your organization` });
+        }
+        
+        next();
+      } catch (error) {
+        console.error('requireModule error:', error);
+        return res.status(500).json({ message: 'Error checking module permissions' });
       }
-      next();
     };
   };
 
@@ -608,6 +1258,427 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user business account modules:", error);
       res.status(500).json({ message: "Failed to fetch modules" });
+    }
+  });
+
+  // Debug endpoint for permissions testing
+  app.get("/api/debug/permissions/:moduleType", requireAuth, async (req: any, res) => {
+    const moduleType = req.params.moduleType;
+    const user = req.user;
+    
+    try {
+      if (user.role === 'SUPER_ADMIN') {
+        return res.json({ hasAccess: true, reason: 'SUPER_ADMIN bypass' });
+      }
+      
+      if (!user.businessAccountId) {
+        return res.json({ hasAccess: false, reason: 'No business account ID' });
+      }
+      
+      console.log(`🔍 Debug: Checking ${moduleType} access for business account ${user.businessAccountId}`);
+      
+      const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
+      const fullResult = await unifiedPermissionService.getModuleAccess(user.businessAccountId, moduleType);
+      const hasAccess = await unifiedPermissionService.hasModuleAccess(user.businessAccountId, moduleType);
+      
+      console.log(`📊 Debug result:`, {
+        businessAccountId: user.businessAccountId,
+        moduleType,
+        hasAccess,
+        fullResult
+      });
+      
+      res.json({
+        businessAccountId: user.businessAccountId,
+        moduleType,
+        hasAccess,
+        fullResult,
+        user: {
+          id: user.id,
+          role: user.role,
+          businessAccountId: user.businessAccountId
+        }
+      });
+    } catch (error) {
+      console.error('Debug permissions error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Simple table structure check
+  app.get("/api/debug/table-structure/:tableName", requireAuth, async (req: any, res) => {
+    const tableName = req.params.tableName;
+    
+    try {
+      console.log(`🔍 Checking structure of table: ${tableName}`);
+      
+      const result = await pool.query(`
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = $1
+        ORDER BY ordinal_position
+      `, [tableName]);
+      
+      res.json({
+        tableName,
+        columns: result.rows
+      });
+    } catch (error) {
+      console.error('Table structure check error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Check business account plan and modules
+  app.get("/api/debug/business-account/:businessAccountId/plan", requireAuth, async (req: any, res) => {
+    const businessAccountId = req.params.businessAccountId;
+    
+    try {
+      console.log(`🔍 Checking plan for business account: ${businessAccountId}`);
+      
+      // Get business account info
+      const businessAccountQuery = await pool.query(`
+        SELECT * FROM business_accounts WHERE id = $1
+      `, [businessAccountId]);
+      
+      if (businessAccountQuery.rows.length === 0) {
+        return res.status(404).json({ error: 'Business account not found' });
+      }
+      
+      const businessAccount = businessAccountQuery.rows[0];
+      console.log(`📊 Business account:`, businessAccount);
+      
+      // Get plan info
+      const planQuery = await pool.query(`
+        SELECT * FROM plans WHERE name = $1
+      `, [businessAccount.plan]);
+      
+      const plan = planQuery.rows[0] || null;
+      console.log(`📋 Plan:`, plan);
+      
+      // Get plan modules
+      let planModules = [];
+      if (plan) {
+        const modulesQuery = await pool.query(`
+          SELECT * FROM plan_modules WHERE plan_id = $1 ORDER BY module_type
+        `, [plan.id]);
+        planModules = modulesQuery.rows;
+      }
+      
+      console.log(`📦 Plan modules: ${planModules.length} modules`);
+      
+      res.json({
+        businessAccount: {
+          id: businessAccount.id,
+          name: businessAccount.name,
+          plan: businessAccount.plan
+        },
+        planDetails: plan,
+        planModules: planModules.map(module => ({
+          moduleType: module.module_type,
+          isIncluded: module.is_included,
+          itemLimit: module.item_limit,
+          features: module.features
+        }))
+      });
+      
+    } catch (error) {
+      console.error('Business account plan check error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // List all plans with their modules
+  app.get("/api/debug/all-plans", requireAuth, async (req: any, res) => {
+    try {
+      console.log(`🔍 Fetching all plans and their modules`);
+      
+      const plansQuery = await pool.query(`
+        SELECT p.*, 
+               array_agg(
+                 json_build_object(
+                   'module_type', pm.module_type,
+                   'is_included', pm.is_included,
+                   'item_limit', pm.item_limit
+                 )
+               ) as modules
+        FROM plans p
+        LEFT JOIN plan_modules pm ON p.id = pm.plan_id
+        GROUP BY p.id, p.name, p.price, p.description
+        ORDER BY p.name
+      `);
+      
+      res.json({
+        plans: plansQuery.rows.map(plan => ({
+          id: plan.id,
+          name: plan.name,
+          price: plan.price,
+          description: plan.description,
+          isActive: plan.is_active,
+          modules: plan.modules.filter(m => m.module_type) // Remove null entries
+        }))
+      });
+      
+    } catch (error) {
+      console.error('All plans fetch error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Fix business account plan assignment
+  app.post("/api/debug/fix-business-account-plan", requireAuth, async (req: any, res) => {
+    const { businessAccountId, newPlanName } = req.body;
+    const user = req.user;
+    
+    try {
+      console.log(`🔧 Fixing plan for business account: ${businessAccountId} → ${newPlanName}`);
+      console.log(`👤 Requested by: ${user.email} (${user.role})`);
+      
+      // Verify the new plan exists
+      const planCheck = await pool.query(`
+        SELECT id, name FROM plans WHERE name = $1 AND is_active = true
+      `, [newPlanName]);
+      
+      if (planCheck.rows.length === 0) {
+        return res.status(400).json({ error: `Plan "${newPlanName}" not found or inactive` });
+      }
+      
+      // Update business account plan
+      const updateResult = await pool.query(`
+        UPDATE business_accounts 
+        SET plan = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING *
+      `, [newPlanName, businessAccountId]);
+      
+      if (updateResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Business account not found' });
+      }
+      
+      console.log(`✅ Plan updated successfully`);
+      
+      res.json({
+        success: true,
+        businessAccountId,
+        oldPlan: updateResult.rows[0].plan, // This will be the new plan, but we log the change
+        newPlan: newPlanName,
+        updatedBy: user.email,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Fix business account plan error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Add module to plan
+  app.post("/api/debug/add-module-to-plan", requireAuth, async (req: any, res) => {
+    const { planName, moduleType, itemLimit = null } = req.body;
+    const user = req.user;
+    
+    try {
+      console.log(`🔧 Adding ${moduleType} module to plan: ${planName} (limit: ${itemLimit || 'unlimited'})`);
+      
+      // Get plan ID
+      const planQuery = await pool.query(`
+        SELECT id FROM plans WHERE name = $1
+      `, [planName]);
+      
+      if (planQuery.rows.length === 0) {
+        return res.status(404).json({ error: `Plan "${planName}" not found` });
+      }
+      
+      const planId = planQuery.rows[0].id;
+      
+      // Add module to plan (or update if exists)
+      const insertResult = await pool.query(`
+        INSERT INTO plan_modules (id, plan_id, module_type, is_included, item_limit)
+        VALUES (gen_random_uuid()::text, $1, $2, true, $3)
+        ON CONFLICT (plan_id, module_type) 
+        DO UPDATE SET 
+          is_included = true,
+          item_limit = EXCLUDED.item_limit
+        RETURNING *
+      `, [planId, moduleType, itemLimit]);
+      
+      console.log(`✅ Module added/updated successfully`);
+      
+      res.json({
+        success: true,
+        planName,
+        moduleType,
+        itemLimit,
+        addedBy: user.email,
+        timestamp: new Date().toISOString(),
+        module: insertResult.rows[0]
+      });
+      
+    } catch (error) {
+      console.error('Add module to plan error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Execute corrective migration endpoint
+  app.post("/api/debug/run-migration/:migrationFile", requireAuth, async (req: any, res) => {
+    const migrationFile = req.params.migrationFile;
+    const user = req.user;
+    
+    try {
+      console.log(`🔧 Running migration: ${migrationFile}`);
+      console.log(`👤 Requested by: ${user.email} (${user.role})`);
+      
+      // Read migration file
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      
+      const migrationPath = path.join(process.cwd(), 'server', 'migrations', `${migrationFile}.sql`);
+      const migrationSQL = await fs.readFile(migrationPath, 'utf8');
+      
+      console.log(`📄 Migration size: ${migrationSQL.length} characters`);
+      
+      // Execute migration
+      const startTime = Date.now();
+      const result = await pool.query(migrationSQL);
+      const duration = Date.now() - startTime;
+      
+      console.log(`✅ Migration completed in ${duration}ms`);
+      
+      res.json({
+        success: true,
+        migrationFile,
+        duration,
+        executedBy: user.email,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Migration execution error:', error);
+      res.status(500).json({ 
+        error: error.message,
+        migrationFile,
+        executedBy: user.email 
+      });
+    }
+  });
+
+  // System-wide audit endpoint for debugging permissions
+  app.get("/api/debug/system-audit", requireAuth, async (req: any, res) => {
+    const user = req.user;
+    
+    try {
+      console.log('🔍 Starting system-wide permissions audit...');
+      
+      const auditResults: any = {
+        timestamp: new Date().toISOString(),
+        requestedBy: user.email,
+        plans: [],
+        businessAccounts: [],
+        issues: []
+      };
+
+      // 1. Audit all plans and their modules
+      const plansQuery = await pool.query(`
+        SELECT p.id, p.name, p.price, p.description,
+               array_agg(
+                 json_build_object(
+                   'module_type', pm.module_type,
+                   'item_limit', pm.item_limit,
+                   'can_create', pm.can_create,
+                   'can_edit', pm.can_edit,
+                   'can_delete', pm.can_delete,
+                   'can_view', pm.can_view
+                 )
+               ) as modules
+        FROM plans p
+        LEFT JOIN plan_modules pm ON p.id = pm.plan_id
+        GROUP BY p.id, p.name, p.price, p.description
+        ORDER BY p.name
+      `);
+      
+      auditResults.plans = plansQuery.rows.map(plan => ({
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        modules: plan.modules.filter(m => m.module_type) // Remove null entries
+      }));
+
+      // 2. Audit all business accounts
+      const businessAccountsQuery = await pool.query(`
+        SELECT ba.id, ba.name, ba.plan_id, p.name as plan_name,
+               (SELECT COUNT(*) FROM users WHERE business_account_id = ba.id) as user_count
+        FROM business_accounts ba
+        LEFT JOIN plans p ON ba.plan_id = p.id
+        ORDER BY ba.name
+      `);
+      
+      const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
+      
+      for (const account of businessAccountsQuery.rows) {
+        const accountAudit: any = {
+          id: account.id,
+          name: account.name,
+          planId: account.plan_id,
+          planName: account.plan_name,
+          userCount: account.user_count,
+          modulePermissions: {}
+        };
+        
+        if (!account.plan_id) {
+          auditResults.issues.push(`${account.name}: No plan assigned`);
+        }
+        
+        // Test unified permissions for standard modules
+        const testModules = ['USERS', 'CRM', 'COMPANIES'];
+        
+        for (const moduleType of testModules) {
+          try {
+            const permResult = await unifiedPermissionService.getModuleAccess(account.id, moduleType);
+            accountAudit.modulePermissions[moduleType] = {
+              hasAccess: permResult.hasAccess,
+              source: permResult.source,
+              permissions: permResult.permissions
+            };
+            
+            if (!permResult.hasAccess && account.plan_id) {
+              auditResults.issues.push(`${account.name}: ${moduleType} denied despite having plan ${account.plan_name}`);
+            }
+          } catch (error) {
+            accountAudit.modulePermissions[moduleType] = {
+              error: error.message
+            };
+            auditResults.issues.push(`${account.name}: ${moduleType} error - ${error.message}`);
+          }
+        }
+        
+        auditResults.businessAccounts.push(accountAudit);
+      }
+
+      // 3. Check system integrity
+      const functionCheck = await pool.query(`
+        SELECT proname FROM pg_proc 
+        WHERE proname = 'get_effective_permissions'
+      `);
+      
+      if (functionCheck.rows.length === 0) {
+        auditResults.issues.push('CRITICAL: get_effective_permissions function missing');
+      }
+
+      const viewCheck = await pool.query(`
+        SELECT viewname FROM pg_views 
+        WHERE viewname = 'v_unified_permissions'
+      `);
+      
+      if (viewCheck.rows.length === 0) {
+        auditResults.issues.push('CRITICAL: v_unified_permissions view missing');
+      }
+
+      console.log(`🔍 Audit complete: ${auditResults.plans.length} plans, ${auditResults.businessAccounts.length} accounts, ${auditResults.issues.length} issues`);
+      
+      res.json(auditResults);
+    } catch (error) {
+      console.error('System audit error:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -762,8 +1833,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Users routes (only for BUSINESS_PLAN within their organization)
-  app.get("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
+  // Users routes (only for BUSINESS_ADMIN within their organization)
+  app.get("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       const users = await storage.getUsers(req.businessAccountId);
       const safeUsers = users.map(user => ({
@@ -777,7 +1848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
+  app.post("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
       
@@ -787,7 +1858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userData.password = generateSecurePassword(12);
       }
       
-      // Automatically assign to the BUSINESS_PLAN user's business account
+      // Automatically assign to the BUSINESS_ADMIN user's business account
       userData = { ...userData, businessAccountId: req.businessAccountId };
       
       const user = await storage.createUser(userData);
@@ -798,7 +1869,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
+  app.put("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       // First check if user exists and user has access
       const existingUser = await storage.getUser(req.params.id);
@@ -826,7 +1897,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
+  app.delete("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
     try {
       const user = await storage.getUser(req.params.id);
       if (!user) {
@@ -985,7 +2056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Legacy agent routes (for backward compatibility)
-  app.get("/api/agents", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), requireBusinessAccount, async (req: any, res) => {
+  app.get("/api/agents", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccount, async (req: any, res) => {
     try {
       const businessAccountId = req.user.role === 'SUPER_ADMIN' ? req.query.businessAccountId : req.businessAccountId;
       const users = await storage.getUsers(businessAccountId);
@@ -1001,7 +2072,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Companies routes (requires COMPANIES module)
-  app.get("/api/companies", requireAuth, requireBusinessAccountWithId, requireModule('COMPANIES'), async (req: any, res) => {
+  app.get("/api/companies", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
     try {
       let businessAccountId;
       if (req.user.role === 'SUPER_ADMIN') {
@@ -1018,7 +2089,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/companies/:id", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
+  app.get("/api/companies/:id", requireBusinessAccount, requireModule('CONTACTS'), async (req: any, res) => {
     try {
       const company = await storage.getCompany(req.params.id);
       if (!company) {
@@ -1037,7 +2108,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/companies", requireBusinessAccount, requireModule('COMPANIES'), checkPlanLimits('COMPANIES', 'create'), async (req: any, res) => {
+  app.post("/api/companies", requireBusinessAccount, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'create'), async (req: any, res) => {
     try {
       const companyData = insertCompanySchema.parse(req.body);
       
@@ -1055,7 +2126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/companies/:id", requireBusinessAccount, requireModule('COMPANIES'), async (req: any, res) => {
+  app.put("/api/companies/:id", requireBusinessAccount, requireModule('CONTACTS'), async (req: any, res) => {
     try {
       // First check if company exists and user has access
       const existingCompany = await storage.getCompany(req.params.id);
@@ -1076,7 +2147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/companies/:id", requireBusinessAccount, requireModule('COMPANIES'), checkPlanLimits('COMPANIES', 'delete'), updateUsageAfterAction('COMPANIES'), async (req: any, res) => {
+  app.delete("/api/companies/:id", requireBusinessAccount, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'delete'), updateUsageAfterAction('CONTACTS'), async (req: any, res) => {
     try {
       // First check if company exists and user has access
       const existingCompany = await storage.getCompany(req.params.id);
@@ -1112,7 +2183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Business account modules (new approach)
-  app.get("/api/business-accounts/:businessAccountId/modules", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.get("/api/business-accounts/:businessAccountId/modules", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
     try {
       const { businessAccountId } = req.params;
       
@@ -1129,7 +2200,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
       const enabledBy = req.user.id;
@@ -1151,7 +2222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_PLAN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
       
@@ -1831,6 +2902,878 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin endpoint to check database tables
+  app.get("/api/admin/check-tables", async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public'
+      `);
+      
+      const businessAccountsResult = await pool.query(`
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_name = 'business_accounts'
+      `);
+      
+      res.json({ 
+        tables: result.rows,
+        business_accounts_columns: businessAccountsResult.rows 
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin endpoint to check OneTouch onboarding status
+  app.get("/api/admin/check-onetouch", async (req, res) => {
+    try {
+      // Get OneTouch business account
+      const businessAccountResult = await pool.query(`
+        SELECT id, name, email, onboarding_completed, profile_completed, plan_selected
+        FROM business_accounts 
+        WHERE name ILIKE '%onetouch%' OR email ILIKE '%onetouch%'
+      `);
+      
+      if (businessAccountResult.rows.length === 0) {
+        return res.json({ message: "OneTouch business account not found" });
+      }
+      
+      const businessAccount = businessAccountResult.rows[0];
+      
+      // Get users for this business account
+      const usersResult = await pool.query(`
+        SELECT id, name, email, business_account_id, role
+        FROM users 
+        WHERE business_account_id = $1
+      `, [businessAccount.id]);
+      
+      // Check company profile
+      const profileResult = await pool.query(`
+        SELECT * FROM company_profiles 
+        WHERE business_account_id = $1
+      `, [businessAccount.id]);
+      
+      // Check business account plans  
+      const planResult = await pool.query(`
+        SELECT * FROM business_account_plans 
+        WHERE business_account_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [businessAccount.id]);
+      
+      res.json({
+        business_account: businessAccount,
+        users: usersResult.rows,
+        has_profile: profileResult.rows.length > 0,
+        profile_data: profileResult.rows[0] || null,
+        has_plan: planResult.rows.length > 0,
+        plan_data: planResult.rows[0] || null
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin endpoint to verify database structure
+  app.get("/api/admin/verify-db-structure", async (req, res) => {
+    try {
+      const checks = {
+        business_accounts: {},
+        users: {},
+        company_profiles: {},
+        business_account_plans: {}
+      };
+
+      // Check business_accounts table
+      const baResult = await pool.query(`
+        SELECT column_name, data_type, is_nullable 
+        FROM information_schema.columns 
+        WHERE table_name = 'business_accounts' 
+        ORDER BY ordinal_position
+      `);
+      checks.business_accounts.columns = baResult.rows;
+
+      const baCount = await pool.query(`SELECT COUNT(*) as count FROM business_accounts`);
+      checks.business_accounts.count = parseInt(baCount.rows[0].count);
+
+      // Check users table
+      const usersResult = await pool.query(`
+        SELECT column_name, data_type, is_nullable 
+        FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        ORDER BY ordinal_position
+      `);
+      checks.users.columns = usersResult.rows;
+
+      const usersCount = await pool.query(`SELECT COUNT(*) as count FROM users`);
+      checks.users.count = parseInt(usersCount.rows[0].count);
+
+      // Check onboarding tables
+      const cpResult = await pool.query(`
+        SELECT column_name, data_type, is_nullable 
+        FROM information_schema.columns 
+        WHERE table_name = 'company_profiles' 
+        ORDER BY ordinal_position
+      `);
+      checks.company_profiles.columns = cpResult.rows;
+
+      const bapResult = await pool.query(`
+        SELECT column_name, data_type, is_nullable 
+        FROM information_schema.columns 
+        WHERE table_name = 'business_account_plans' 
+        ORDER BY ordinal_position
+      `);
+      checks.business_account_plans.columns = bapResult.rows;
+
+      res.json(checks);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin endpoint to get all users and business accounts overview
+  app.get("/api/admin/system-overview", async (req, res) => {
+    try {
+      // Get all business accounts with onboarding status
+      const businessAccounts = await pool.query(`
+        SELECT 
+          id, name, email, 
+          onboarding_completed, profile_completed, plan_selected,
+          created_at
+        FROM business_accounts 
+        ORDER BY created_at DESC
+      `);
+
+      // Get all users grouped by business account
+      const users = await pool.query(`
+        SELECT 
+          id, name, email, role, business_account_id,
+          created_at
+        FROM users 
+        ORDER BY business_account_id, created_at DESC
+      `);
+
+      // Get users by type
+      const usersByType = await pool.query(`
+        SELECT 
+          role, 
+          COUNT(*) as count,
+          ARRAY_AGG(email ORDER BY created_at DESC) as emails
+        FROM users 
+        GROUP BY role
+      `);
+
+      // Get business accounts with user counts
+      const accountsWithUsers = await pool.query(`
+        SELECT 
+          ba.id, ba.name, ba.onboarding_completed,
+          COUNT(u.id) as user_count,
+          ARRAY_AGG(u.email ORDER BY u.created_at DESC) as user_emails
+        FROM business_accounts ba
+        LEFT JOIN users u ON ba.id = u.business_account_id
+        GROUP BY ba.id, ba.name, ba.onboarding_completed
+        ORDER BY ba.created_at DESC
+      `);
+
+      res.json({
+        summary: {
+          total_business_accounts: businessAccounts.rows.length,
+          total_users: users.rows.length,
+        },
+        business_accounts: businessAccounts.rows,
+        users_by_type: usersByType.rows,
+        accounts_with_users: accountsWithUsers.rows,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // TEMPORARY: Reset password for luis@onetouch.hn
+  app.post("/api/admin/reset-luis-password", async (req, res) => {
+    try {
+      const newPassword = 'Luis123!';
+      const hashedPassword = bcrypt.hashSync(newPassword, 12);
+      
+      const result = await pool.query(`
+        UPDATE users 
+        SET password = $1, updated_at = NOW()
+        WHERE email = $2
+        RETURNING id, name, email, role
+      `, [hashedPassword, 'luis@onetouch.hn']);
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      console.log('✅ Password reset for luis@onetouch.hn - new password: Luis123!');
+      res.json({ 
+        message: "Password reset successfully", 
+        user: result.rows[0],
+        newPassword: newPassword
+      });
+    } catch (error) {
+      console.error("Error resetting password:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Emergency: Reset all non-super-admin user passwords  
+  app.post("/api/admin/emergency-password-reset", async (req, res) => {
+    try {
+      const defaultPassword = "temp123456";
+      const hashedPassword = bcrypt.hashSync(defaultPassword, 12);
+      
+      // Reset passwords for all users except SUPER_ADMIN
+      const updateResult = await pool.query(`
+        UPDATE users 
+        SET password = $1, updated_at = NOW()
+        WHERE role != 'SUPER_ADMIN'
+        RETURNING id, name, email, role, business_account_id
+      `, [hashedPassword]);
+      
+      res.json({
+        message: "Emergency password reset completed",
+        temporary_password: defaultPassword, 
+        affected_users: updateResult.rows,
+        instructions: "All non-super-admin users can now login with: " + defaultPassword
+      });
+    } catch (error) {
+      console.error("Emergency password reset failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create user permissions table
+  app.post("/api/admin/create-user-permissions-table", async (req, res) => {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS user_permissions (
+          id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id VARCHAR NOT NULL,
+          business_account_id VARCHAR NOT NULL,
+          module_type VARCHAR NOT NULL, -- 'USERS', 'COMPANIES', 'CRM', 'REPORTS'
+          can_view BOOLEAN DEFAULT TRUE,
+          can_create BOOLEAN DEFAULT FALSE,
+          can_edit BOOLEAN DEFAULT FALSE,
+          can_delete BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          created_by VARCHAR, -- ID del BUSINESS_ADMIN que asignó permisos
+          UNIQUE(user_id, module_type)
+        )
+      `);
+
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_permissions_business ON user_permissions(business_account_id)`);
+      
+      res.json({ message: "User permissions table created successfully" });
+    } catch (error) {
+      console.error("Error creating user permissions table:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User permissions management endpoints (only for BUSINESS_ADMIN)
+  
+  // Get permissions for a specific user
+  app.get("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      
+      // Verify user belongs to same business account (except for SUPER_ADMIN)
+      if (req.user.role !== 'SUPER_ADMIN') {
+        const user = await storage.getUser(userId);
+        if (!user || user.businessAccountId !== req.businessAccountId) {
+          return res.status(403).json({ message: "Access denied to user" });
+        }
+      }
+      
+      const permissions = await pool.query(`
+        SELECT module_type, can_view, can_create, can_edit, can_delete
+        FROM user_permissions 
+        WHERE user_id = $1
+        ORDER BY module_type
+      `, [userId]);
+      
+      // Convert to object format for easier frontend consumption
+      const permissionsObj = {};
+      permissions.rows.forEach(row => {
+        permissionsObj[row.module_type] = {
+          canView: row.can_view,
+          canCreate: row.can_create,
+          canEdit: row.can_edit,
+          canDelete: row.can_delete
+        };
+      });
+      
+      res.json(permissionsObj);
+    } catch (error) {
+      console.error("Error getting user permissions:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // Set permissions for a specific user
+  app.post("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      const { userId } = req.params;
+      const { moduleType, canView, canCreate, canEdit, canDelete } = req.body;
+      
+      // ENHANCED VALIDATION: Comprehensive security checks
+      if (req.user.role !== 'SUPER_ADMIN') {
+        // Get user with business account validation in transaction
+        const userResult = await client.query(`
+          SELECT id, business_account_id, role 
+          FROM users 
+          WHERE id = $1 AND deleted_at IS NULL
+          FOR UPDATE
+        `, [userId]);
+        
+        const user = userResult.rows[0];
+        if (!user || user.business_account_id !== req.businessAccountId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ message: "Access denied to user" });
+        }
+        
+        // SECURITY: Prevent privilege escalation
+        if (user.role === 'BUSINESS_ADMIN' || user.role === 'SUPER_ADMIN') {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ message: "Cannot modify admin permissions" });
+        }
+        
+        // BUSINESS_ADMIN cannot modify their own permissions
+        if (userId === req.user.id) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ message: "Cannot modify your own permissions" });
+        }
+      }
+      
+      // VALIDATION: Ensure module type is valid
+      const validModules = ['USERS', 'COMPANIES', 'CRM', 'REPORTS'];
+      if (!validModules.includes(moduleType)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: "Invalid module type" });
+      }
+      
+      // Upsert permissions
+      await pool.query(`
+        INSERT INTO user_permissions (user_id, business_account_id, module_type, can_view, can_create, can_edit, can_delete, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (user_id, module_type)
+        DO UPDATE SET 
+          can_view = EXCLUDED.can_view,
+          can_create = EXCLUDED.can_create,
+          can_edit = EXCLUDED.can_edit,
+          can_delete = EXCLUDED.can_delete,
+          updated_at = NOW(),
+          created_by = EXCLUDED.created_by
+      `, [userId, req.businessAccountId, moduleType, canView, canCreate, canEdit, canDelete, req.user.id]);
+      
+      res.json({ message: "Permissions updated successfully" });
+    } catch (error) {
+      console.error("Error setting user permissions:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // Bulk update permissions for a user (all modules at once)
+  app.put("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const { permissions } = req.body; // { USERS: { canView: true, ... }, COMPANIES: { ... } }
+      
+      // Verify user belongs to same business account (except for SUPER_ADMIN)
+      if (req.user.role !== 'SUPER_ADMIN') {
+        const user = await storage.getUser(userId);
+        if (!user || user.businessAccountId !== req.businessAccountId) {
+          return res.status(403).json({ message: "Access denied to user" });
+        }
+        
+        // BUSINESS_ADMIN cannot modify their own permissions
+        if (userId === req.user.id) {
+          return res.status(403).json({ message: "Cannot modify your own permissions" });
+        }
+      }
+      
+      // Begin transaction
+      await pool.query('BEGIN');
+      
+      try {
+        // Delete existing permissions for this user
+        await pool.query('DELETE FROM user_permissions WHERE user_id = $1', [userId]);
+        
+        // Insert new permissions
+        for (const [moduleType, perms] of Object.entries(permissions)) {
+          await pool.query(`
+            INSERT INTO user_permissions (user_id, business_account_id, module_type, can_view, can_create, can_edit, can_delete, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `, [userId, req.businessAccountId, moduleType, perms.canView, perms.canCreate, perms.canEdit, perms.canDelete, req.user.id]);
+        }
+        
+        await pool.query('COMMIT');
+        res.json({ message: "All permissions updated successfully" });
+      } catch (error) {
+        await pool.query('ROLLBACK');
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error bulk updating user permissions:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin endpoint to run simple onboarding migration
+  app.post("/api/admin/migrate-onboarding-simple", async (req, res) => {
+    try {
+      console.log('🚀 Starting simple onboarding migration...');
+      
+      // Execute SQL statements directly
+      const statements = [
+        'ALTER TABLE business_accounts ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
+        'ALTER TABLE business_accounts ADD COLUMN IF NOT EXISTS profile_completed BOOLEAN DEFAULT FALSE',
+        'ALTER TABLE business_accounts ADD COLUMN IF NOT EXISTS plan_selected BOOLEAN DEFAULT FALSE',
+        `CREATE TABLE IF NOT EXISTS company_profiles (
+            id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            business_account_id VARCHAR NOT NULL,
+            industry VARCHAR(100),
+            employee_count VARCHAR(50),
+            website VARCHAR(255),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(business_account_id)
+        )`,
+        `CREATE TABLE IF NOT EXISTS business_account_plans (
+            id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            business_account_id VARCHAR NOT NULL,
+            plan_name VARCHAR(100) NOT NULL,
+            billing_cycle VARCHAR(20) CHECK (billing_cycle IN ('monthly', 'annual')) DEFAULT 'monthly',
+            price_per_month DECIMAL(10,2),
+            features TEXT,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )`,
+        'CREATE INDEX IF NOT EXISTS idx_business_accounts_onboarding ON business_accounts(onboarding_completed)',
+        'CREATE INDEX IF NOT EXISTS idx_company_profiles_business_id ON company_profiles(business_account_id)',
+        'CREATE INDEX IF NOT EXISTS idx_business_plans_active ON business_account_plans(business_account_id, is_active)'
+      ];
+      
+      for (const statement of statements) {
+        if (statement.trim()) {
+          try {
+            await pool.query(statement.trim());
+            console.log('✅ Executed:', statement.trim().substring(0, 50) + '...');
+          } catch (err) {
+            console.log('⚠️ Statement failed (may already exist):', err.message);
+          }
+        }
+      }
+      
+      console.log('✅ Simple onboarding migration executed successfully');
+      res.json({ message: "Simple onboarding migration completed successfully" });
+    } catch (error) {
+      console.error("Error running simple onboarding migration:", error);
+      res.status(500).json({ message: "Migration failed", error: error.message });
+    }
+  });
+
+  // Admin endpoint to run onboarding migration
+  app.post("/api/admin/migrate-onboarding", async (req, res) => {
+    try {
+      console.log('🚀 Starting onboarding migration...');
+      
+      // Step 1: Add columns to business_accounts
+      try {
+        await pool.query(`
+          ALTER TABLE business_accounts 
+          ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE
+        `);
+        await pool.query(`
+          ALTER TABLE business_accounts 
+          ADD COLUMN IF NOT EXISTS profile_completed BOOLEAN DEFAULT FALSE
+        `);
+        await pool.query(`
+          ALTER TABLE business_accounts 
+          ADD COLUMN IF NOT EXISTS plan_selected BOOLEAN DEFAULT FALSE
+        `);
+        console.log('✅ Added onboarding fields to business_accounts');
+      } catch (alterError) {
+        console.log('⚠️ Column additions already exist or failed:', alterError.message);
+      }
+
+      // Step 2: Create company_profiles table without foreign key
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS company_profiles (
+              id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+              business_account_id VARCHAR NOT NULL,
+              industry VARCHAR(100),
+              employee_count VARCHAR(50),
+              website VARCHAR(255),
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW(),
+              UNIQUE(business_account_id)
+          )
+        `);
+        console.log('✅ Created company_profiles table');
+      } catch (createError) {
+        console.log('⚠️ company_profiles table already exists or failed:', createError.message);
+      }
+
+      // Step 3: Create business_account_plans table without foreign key
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS business_account_plans (
+              id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+              business_account_id VARCHAR NOT NULL,
+              plan_name VARCHAR(100) NOT NULL,
+              billing_cycle VARCHAR(20) CHECK (billing_cycle IN ('monthly', 'annual')) DEFAULT 'monthly',
+              price_per_month DECIMAL(10,2),
+              features TEXT,
+              is_active BOOLEAN DEFAULT TRUE,
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW()
+          )
+        `);
+        console.log('✅ Created business_account_plans table');
+      } catch (createError) {
+        console.log('⚠️ business_account_plans table already exists or failed:', createError.message);
+      }
+
+      // Step 4: Create indexes
+      try {
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_accounts_onboarding ON business_accounts(onboarding_completed)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_company_profiles_business_id ON company_profiles(business_account_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_business_plans_active ON business_account_plans(business_account_id, is_active)`);
+        console.log('✅ Created indexes');
+      } catch (indexError) {
+        console.log('⚠️ Indexes already exist or failed:', indexError.message);
+      }
+      
+      console.log('✅ Onboarding migration executed successfully');
+      res.json({ message: "Onboarding migration completed successfully" });
+    } catch (error) {
+      console.error("Error running onboarding migration:", error);
+      res.status(500).json({ message: "Migration failed", error: error.message });
+    }
+  });
+
+  // Middleware to check onboarding status
+  async function checkOnboardingStatus(businessAccountId: string) {
+    const result = await pool.query(`
+      SELECT 
+        onboarding_completed,
+        profile_completed,
+        plan_selected
+      FROM business_accounts 
+      WHERE id = $1
+    `, [businessAccountId]);
+    
+    if (result.rows.length === 0) {
+      return null;
+    }
+    
+    const account = result.rows[0];
+    return {
+      onboarding_completed: account.onboarding_completed,
+      profile_completed: account.profile_completed,
+      plan_selected: account.plan_selected,
+      needs_profile: !account.profile_completed,
+      needs_plan: !account.plan_selected,
+      needs_onboarding: !account.onboarding_completed
+    };
+  }
+
+  // Endpoint to get onboarding status for a business account
+  app.get("/api/onboarding/status/:businessAccountId", async (req, res) => {
+    try {
+      const { businessAccountId } = req.params;
+      const status = await checkOnboardingStatus(businessAccountId);
+      
+      if (!status) {
+        return res.status(404).json({ error: "Business account not found" });
+      }
+      
+      res.json(status);
+    } catch (error) {
+      console.error("Error checking onboarding status:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Endpoint to get available plans for onboarding (no auth required)
+  app.get("/api/onboarding/plans", async (req, res) => {
+    try {
+      const plans = await storage.getPlans();
+      const activePlans = plans.filter(plan => plan.status === 'ACTIVE');
+      res.json(activePlans);
+    } catch (error) {
+      console.error("Error fetching plans for onboarding:", error);
+      res.status(500).json({ error: "Failed to fetch plans" });
+    }
+  });
+
+  // Endpoint to save company profile
+  app.post("/api/onboarding/profile", async (req, res) => {
+    try {
+      const { businessAccountId, industry, employeeCount, website } = req.body;
+      
+      if (!businessAccountId || !industry || !employeeCount) {
+        return res.status(400).json({ error: "businessAccountId, industry, and employeeCount are required" });
+      }
+      
+      // Insert or update company profile
+      await pool.query(`
+        INSERT INTO company_profiles (business_account_id, industry, employee_count, website)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (business_account_id) 
+        DO UPDATE SET 
+          industry = $2,
+          employee_count = $3,
+          website = $4,
+          updated_at = NOW()
+      `, [businessAccountId, industry, employeeCount, website || null]);
+      
+      // Update business account profile_completed flag
+      await pool.query(`
+        UPDATE business_accounts 
+        SET profile_completed = true, updated_at = NOW()
+        WHERE id = $1
+      `, [businessAccountId]);
+      
+      console.log(`✅ Profile saved for business account: ${businessAccountId}`);
+      res.json({ success: true, message: "Profile saved successfully" });
+    } catch (error) {
+      console.error("Error saving company profile:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Endpoint to save plan selection
+  app.post("/api/onboarding/plan", async (req, res) => {
+    try {
+      const { businessAccountId, planId, billingCycle } = req.body;
+      
+      if (!businessAccountId || !planId || !billingCycle) {
+        return res.status(400).json({ error: "businessAccountId, planId, and billingCycle are required" });
+      }
+      
+      // Get plan details to calculate trial end date and pricing
+      const plan = await storage.getPlan(planId);
+      if (!plan) {
+        return res.status(404).json({ error: "Plan not found" });
+      }
+      
+      // Calculate trial end date based on plan's trial days
+      const trialStartDate = new Date();
+      const trialEndDate = new Date();
+      trialEndDate.setDate(trialEndDate.getDate() + plan.trialDays);
+      
+      // Determine price based on billing cycle
+      let totalAmount = 0;
+      if (billingCycle === 'monthly') {
+        totalAmount = parseFloat(plan.monthlyPrice || plan.price);
+      } else if (billingCycle === 'annual') {
+        totalAmount = parseFloat(plan.annualPrice || plan.price) * 12;
+      }
+      
+      // First, deactivate any existing plans for this business account
+      await pool.query(`
+        UPDATE business_account_plans 
+        SET status = 'CANCELLED', updated_at = NOW()
+        WHERE business_account_id = $1 AND status IN ('TRIAL', 'ACTIVE')
+      `, [businessAccountId]);
+      
+      // Create new business account plan using the correct storage function
+      const newSubscription = await storage.createBusinessAccountPlan({
+        businessAccountId,
+        planId,
+        status: 'TRIAL',
+        trialStartDate,
+        trialEndDate,
+        subscriptionStartDate: null,
+        subscriptionEndDate: null,
+        autoRenew: true,
+        billingFrequency: billingCycle.toUpperCase(),
+        totalAmount,
+        currency: 'USD'
+      });
+      
+      // CRITICAL FIX: Update business account plan field for UnifiedPermissionService
+      await pool.query(
+        'UPDATE business_accounts SET plan = $1, plan_selected = true, updated_at = NOW() WHERE id = $2',
+        [plan.name, businessAccountId]
+      );
+      
+      console.log(`✅ Updated business account plan field: ${businessAccountId} -> ${plan.name}`);
+      
+      // Enable modules included in the plan automatically
+      const planModules = await storage.getPlanModules(planId);
+      const includedModules = planModules.filter(module => module.isIncluded);
+      
+      // Helper function to get moduleId from moduleType
+      const getModuleId = async (moduleType: string): Promise<string | null> => {
+        const moduleQuery = await pool.query('SELECT id FROM modules WHERE type = $1', [moduleType]);
+        return moduleQuery.rows.length > 0 ? moduleQuery.rows[0].id : null;
+      };
+      
+      // Get SUPER_ADMIN user ID for automatic module enabling
+      const systemUserResult = await pool.query('SELECT id FROM users WHERE role = \'SUPER_ADMIN\' LIMIT 1');
+      const systemUserId = systemUserResult.rows.length > 0 ? systemUserResult.rows[0].id : null;
+      
+      const enabledModuleTypes = [];
+      for (const module of includedModules) {
+        try {
+          const moduleId = await getModuleId(module.moduleType);
+          if (moduleId && systemUserId) {
+            await storage.enableModuleForBusinessAccount(businessAccountId, moduleId, systemUserId);
+            enabledModuleTypes.push(module.moduleType);
+            console.log(`✅ Enabled module ${module.moduleType} (${moduleId}) for business account ${businessAccountId}`);
+          } else {
+            console.warn(`⚠️ Missing requirements - Module ID: ${moduleId}, System User: ${systemUserId}`);
+          }
+        } catch (moduleError) {
+          console.warn(`⚠️ Could not enable module ${module.moduleType}:`, moduleError.message);
+          // Continue with other modules even if one fails
+        }
+      }
+      
+      console.log(`✅ Plan selected for business account: ${businessAccountId} - ${plan.name} (Trial until ${trialEndDate.toISOString()})`);
+      res.json({ 
+        success: true, 
+        message: "Plan selected successfully",
+        subscription: newSubscription,
+        enabledModules: enabledModuleTypes
+      });
+    } catch (error) {
+      console.error("Error saving plan selection:", error);
+      res.status(500).json({ error: "Internal server error", details: error.message });
+    }
+  });
+
+  // Endpoint to complete onboarding
+  app.post("/api/onboarding/complete", async (req, res) => {
+    try {
+      const { businessAccountId } = req.body;
+      
+      if (!businessAccountId) {
+        return res.status(400).json({ error: "businessAccountId is required" });
+      }
+      
+      // Check if profile and plan are completed
+      const status = await checkOnboardingStatus(businessAccountId);
+      
+      if (!status) {
+        return res.status(404).json({ error: "Business account not found" });
+      }
+      
+      // Check if there's an active subscription (instead of relying on plan_selected flag)
+      const hasActivePlan = await pool.query(`
+        SELECT id FROM business_account_plans 
+        WHERE business_account_id = $1 AND status IN ('TRIAL', 'ACTIVE')
+      `, [businessAccountId]);
+      
+      if (!status.profile_completed || hasActivePlan.rows.length === 0) {
+        return res.status(400).json({ 
+          error: "Cannot complete onboarding: profile and plan selection must be completed first",
+          status: { ...status, has_active_plan: hasActivePlan.rows.length > 0 }
+        });
+      }
+      
+      // Mark onboarding as completed AND plan as selected
+      await pool.query(`
+        UPDATE business_accounts 
+        SET onboarding_completed = true, plan_selected = true, updated_at = NOW()
+        WHERE id = $1
+      `, [businessAccountId]);
+      
+      console.log(`✅ Onboarding completed for business account: ${businessAccountId}`);
+      res.json({ success: true, message: "Onboarding completed successfully" });
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Admin endpoint to delete business account by email
+  app.delete("/api/admin/delete-business-by-email/:email", async (req, res) => {
+    try {
+      const { email } = req.params;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+      }
+      
+      // Find user and business account
+      const userQuery = await pool.query(`
+        SELECT u.id as user_id, u.name as user_name, u.business_account_id, ba.name as business_name
+        FROM users u 
+        JOIN business_accounts ba ON u.business_account_id = ba.id 
+        WHERE u.email = $1
+      `, [email]);
+      
+      if (userQuery.rows.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const user = userQuery.rows[0];
+      
+      // Delete user first (foreign key constraint)
+      await pool.query('DELETE FROM users WHERE id = $1', [user.user_id]);
+      console.log(`✅ Deleted user: ${user.user_name} (${email})`);
+      
+      // Delete business account
+      await pool.query('DELETE FROM business_accounts WHERE id = $1', [user.business_account_id]);
+      console.log(`✅ Deleted business account: ${user.business_name}`);
+      
+      res.json({ 
+        message: "Business account and user deleted successfully",
+        deletedUser: user.user_name,
+        deletedBusiness: user.business_name,
+        email: email
+      });
+      
+    } catch (error) {
+      console.error("Error deleting business account:", error);
+      res.status(500).json({ message: "Failed to delete business account" });
+    }
+  });
+
+  // Test Brevo template endpoint
+  app.post("/api/test-business-welcome", async (req, res) => {
+    try {
+      const { to, companyName, responsibleName, tempPassword } = req.body;
+      
+      if (!to || !companyName || !responsibleName || !tempPassword) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+      
+      const { sendBusinessWelcomeTemplate } = await import('./services/brevoTemplateService');
+      
+      const success = await sendBusinessWelcomeTemplate({
+        to,
+        companyName,
+        responsibleName,
+        tempPassword
+      });
+      
+      if (success) {
+        res.json({ message: "Business welcome template sent successfully", status: "success" });
+      } else {
+        res.status(500).json({ message: "Failed to send template", status: "error" });
+      }
+    } catch (error) {
+      console.error("Error testing template:", error);
+      res.status(500).json({ message: "Failed to send template", status: "error" });
+    }
+  });
+
   app.post("/api/test-email", async (req, res) => {
     try {
       const emailTo = req.body.to || "luis@onetouch.hn";
@@ -2383,8 +4326,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { moduleType } = req.params;
       const businessAccountId = req.businessAccountId;
+      const userId = req.user.id; // Pass user ID for custom permissions check
       
-      const permissions = await planService.getModulePermissions(businessAccountId, moduleType);
+      const permissions = await planService.getModulePermissions(businessAccountId, moduleType, userId);
       res.json(permissions);
     } catch (error) {
       console.error("Error getting module permissions:", error);

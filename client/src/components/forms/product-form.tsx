@@ -231,7 +231,7 @@ export default function ProductForm({ product, onSuccess }: ProductFormProps) {
                         {(() => {
                           switch (module.type) {
                             case 'USERS': return <Users className="h-4 w-4" />;
-                            case 'COMPANIES': return <Building className="h-4 w-4" />;
+                            case 'CONTACTS': return <Building className="h-4 w-4" />;
                             case 'CRM': return <BarChart className="h-4 w-4" />;
                             default: return <Package className="h-4 w-4" />;
                           }

@@ -1,7 +1,7 @@
 {
-  "name": "controly",
-  "version": "1.0.0",
-  "description": "Controly - CRM moderno y completo para el control total de tu negocio",
+  "name": "bizflowcrm",
+  "version": "2.0.0",
+  "description": "BizFlowCRM - Sistema integral de gestión de negocios multi-tenant",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -12,15 +12,17 @@
     "customers",
     "admin"
   ],
-  "author": "ShimliAdmin Team",
+  "author": "BizFlowCRM Team",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tu-usuario/shimliadmin.git"
+    "url": "https://github.com/luisaguilar/BizFlowCRM.git"
   },
   "scripts": {
-    "build": "echo 'Backend does not require build step'",
-    "server": "npx tsx server/index.ts",
-    "start": "npx tsx server/index.ts"
+    "build": "npm run build:server",
+    "build:server": "npx tsc --project server/tsconfig.json",
+    "start": "node server/dist/index.js",
+    "dev": "npx tsx server/index.ts",
+    "server": "npx tsx server/index.ts"
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",

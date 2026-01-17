@@ -124,7 +124,7 @@ export default function Agents() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-muted-foreground">Administradores</p>
                   <p className="text-2xl font-bold text-foreground" data-testid="admin-users">
-                    {agents.filter(agent => agent.role === 'BUSINESS_PLAN').length}
+                    {agents.filter(agent => agent.role === 'BUSINESS_ADMIN').length}
                   </p>
                 </div>
               </div>
@@ -179,7 +179,7 @@ export default function Agents() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        agent.role === 'BUSINESS_PLAN' 
+                        agent.role === 'BUSINESS_ADMIN' 
                           ? 'bg-purple-100 text-purple-800' 
                           : 'bg-blue-100 text-blue-800'
                       }`}>

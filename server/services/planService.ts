@@ -28,9 +28,6 @@ export class PlanService {
         pm.module_type,
         pm.is_included,
         pm.item_limit,
-        pm.can_create,
-        pm.can_edit,
-        pm.can_delete,
         pm.features
       FROM business_account_plans bap
       INNER JOIN plans p ON bap.plan_id = p.id
@@ -70,9 +67,6 @@ export class PlanService {
             moduleType: row.module_type,
             isIncluded: row.is_included,
             itemLimit: row.item_limit,
-            canCreate: row.can_create,
-            canEdit: row.can_edit,
-            canDelete: row.can_delete,
             features: row.features
           }))
       };
@@ -118,7 +112,111 @@ export class PlanService {
     moduleType: string,
     action: 'create' | 'edit' | 'delete' | 'view' = 'create'
   ): Promise<LimitCheckResult> {
-    // Get subscription info
+    // For non-create actions, use the simpler check without transactions
+    if (action !== 'create') {
+      return this.checkNonCreateLimit(businessAccountId, moduleType, action);
+    }
+
+    // For create actions, use transaction-based atomic checking
+    const { pool } = await import('../db');
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      
+      // Get subscription info
+      const subscription = await this.getBusinessAccountSubscription(businessAccountId);
+      
+      if (!subscription.currentPlan) {
+        await client.query('ROLLBACK');
+        return {
+          canProceed: false,
+          currentCount: 0,
+          limit: 0,
+          message: 'No tienes un plan activo. Por favor, contacta al administrador.'
+        };
+      }
+
+      // Check if module is included in current plan
+      const planModule = subscription.currentPlan.modules.find(
+        m => m.moduleType === moduleType && m.isIncluded
+      );
+
+      // Check if module is available through additional products
+      const additionalProduct = subscription.additionalProducts.find(
+        p => p.product.moduleType === moduleType && p.product.type === 'MODULE'
+      );
+
+      if (!planModule && !additionalProduct) {
+        await client.query('ROLLBACK');
+        return {
+          canProceed: false,
+          currentCount: 0,
+          limit: 0,
+          message: `El módulo ${AVAILABLE_MODULES[moduleType as keyof typeof AVAILABLE_MODULES]?.name || moduleType} no está incluido en tu plan actual.`
+        };
+      }
+
+      // Check create permissions
+      const permissions = planModule || { canCreate: true, canEdit: true, canDelete: true };
+      if (!permissions.canCreate) {
+        await client.query('ROLLBACK');
+        return {
+          canProceed: false,
+          currentCount: 0,
+          limit: 0,
+          message: `Tu plan no permite crear nuevos elementos en ${moduleType}.`
+        };
+      }
+
+      // ATOMIC: Lock and check current usage with SELECT FOR UPDATE
+      let currentUsage = 0;
+      const limit = this.getEffectiveLimit(businessAccountId, moduleType, subscription);
+      
+      if (limit !== null) {
+        // Lock the usage record to prevent race conditions
+        const usageQuery = this.getLockingUsageQuery(moduleType);
+        const usageResult = await client.query(usageQuery, [businessAccountId]);
+        currentUsage = usageResult.rows.length;
+
+        // Check if we're at the limit
+        if (currentUsage >= limit) {
+          await client.query('ROLLBACK');
+          const moduleName = AVAILABLE_MODULES[moduleType as keyof typeof AVAILABLE_MODULES]?.name || moduleType;
+          return {
+            canProceed: false,
+            currentCount: currentUsage,
+            limit,
+            message: `Has alcanzado el límite de ${limit} ${moduleName.toLowerCase()}. Actualiza tu plan para crear más.`
+          };
+        }
+      }
+
+      await client.query('COMMIT');
+      return {
+        canProceed: true,
+        currentCount: currentUsage,
+        limit,
+        message: undefined
+      };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error in checkLimit transaction:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Helper method for non-create actions (no transaction needed)
+   */
+  private async checkNonCreateLimit(
+    businessAccountId: string,
+    moduleType: string,
+    action: 'edit' | 'delete' | 'view'
+  ): Promise<LimitCheckResult> {
     const subscription = await this.getBusinessAccountSubscription(businessAccountId);
     
     if (!subscription.currentPlan) {
@@ -153,16 +251,6 @@ export class PlanService {
     const permissions = planModule || { canCreate: true, canEdit: true, canDelete: true };
     
     switch (action) {
-      case 'create':
-        if (!permissions.canCreate) {
-          return {
-            canProceed: false,
-            currentCount: 0,
-            limit: 0,
-            message: `Tu plan no permite crear nuevos elementos en ${moduleType}.`
-          };
-        }
-        break;
       case 'edit':
         if (!permissions.canEdit) {
           return {
@@ -185,31 +273,6 @@ export class PlanService {
         break;
     }
 
-    // For create action, check count limits
-    if (action === 'create') {
-      const currentUsage = await this.getCurrentUsage(businessAccountId, moduleType);
-      const limit = this.getEffectiveLimit(businessAccountId, moduleType, subscription);
-
-      // If there's a limit, check if we're at or over it
-      if (limit !== null && currentUsage >= limit) {
-        const moduleName = AVAILABLE_MODULES[moduleType as keyof typeof AVAILABLE_MODULES]?.name || moduleType;
-        return {
-          canProceed: false,
-          currentCount: currentUsage,
-          limit,
-          message: `Has alcanzado el límite de ${limit} ${moduleName.toLowerCase()}. Actualiza tu plan para crear más.`
-        };
-      }
-
-      return {
-        canProceed: true,
-        currentCount: currentUsage,
-        limit,
-        message: undefined
-      };
-    }
-
-    // For other actions, just return success if permissions are OK
     const currentUsage = await this.getCurrentUsage(businessAccountId, moduleType);
     return {
       canProceed: true,
@@ -217,6 +280,38 @@ export class PlanService {
       limit: null,
       message: undefined
     };
+  }
+
+  /**
+   * Get locking query for specific module types to prevent race conditions
+   */
+  private getLockingUsageQuery(moduleType: string): string {
+    switch (moduleType) {
+      case 'USERS':
+        return `
+          SELECT id FROM users 
+          WHERE business_account_id = $1 AND (deleted_at IS NULL OR deleted_at > NOW())
+          FOR UPDATE
+        `;
+      case 'COMPANIES':
+        return `
+          SELECT id FROM companies 
+          WHERE business_account_id = $1 AND (deleted_at IS NULL OR deleted_at > NOW())
+          FOR UPDATE
+        `;
+      case 'CRM':
+        return `
+          SELECT id FROM opportunities 
+          WHERE business_account_id = $1 AND (deleted_at IS NULL OR deleted_at > NOW())
+          FOR UPDATE
+        `;
+      default:
+        return `
+          SELECT 1 
+          WHERE 1 = 0
+          FOR UPDATE
+        `;
+    }
   }
 
   /**
@@ -282,12 +377,18 @@ export class PlanService {
   }
 
   /**
-   * Obtiene los permisos de un módulo para una business account
+   * Obtiene los permisos de un módulo para una business account (considerando permisos de usuario)
+   * UPDATED: Now uses the unified permission system
    */
-  async getModulePermissions(businessAccountId: string, moduleType: string): Promise<ModulePermissions> {
-    const subscription = await this.getBusinessAccountSubscription(businessAccountId);
+  async getModulePermissions(businessAccountId: string, moduleType: string, userId?: string): Promise<ModulePermissions> {
+    const { unifiedPermissionService } = await import('./unifiedPermissionService');
     
-    if (!subscription.currentPlan) {
+    try {
+      const result = await unifiedPermissionService.getModuleAccess(businessAccountId, moduleType, userId);
+      return result.permissions;
+    } catch (error) {
+      console.error('Error getting module permissions:', error);
+      // Fallback to denied permissions
       return {
         canCreate: false,
         canEdit: false,
@@ -299,44 +400,6 @@ export class PlanService {
         isNearLimit: false
       };
     }
-
-    const planModule = subscription.currentPlan.modules.find(
-      m => m.moduleType === moduleType && m.isIncluded
-    );
-
-    const additionalProduct = subscription.additionalProducts.find(
-      p => p.product.moduleType === moduleType && p.product.type === 'MODULE'
-    );
-
-    if (!planModule && !additionalProduct) {
-      return {
-        canCreate: false,
-        canEdit: false,
-        canDelete: false,
-        canView: false,
-        itemLimit: 0,
-        currentCount: 0,
-        isAtLimit: true,
-        isNearLimit: false
-      };
-    }
-
-    const currentUsage = await this.getCurrentUsage(businessAccountId, moduleType);
-    const effectiveLimit = this.getEffectiveLimit(businessAccountId, moduleType, subscription);
-
-    const isAtLimit = effectiveLimit !== null && currentUsage >= effectiveLimit;
-    const isNearLimit = effectiveLimit !== null && currentUsage >= effectiveLimit * 0.8;
-    
-    return {
-      canCreate: planModule?.canCreate || true,
-      canEdit: planModule?.canEdit || true,
-      canDelete: planModule?.canDelete || true,
-      canView: true, // Always allow viewing if module is available
-      itemLimit: effectiveLimit,
-      currentCount: currentUsage,
-      isAtLimit,
-      isNearLimit
-    };
   }
 
   /**

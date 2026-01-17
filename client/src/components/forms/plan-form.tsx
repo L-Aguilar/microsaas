@@ -18,14 +18,23 @@ import { Package, DollarSign, Calendar, Settings, Users, Building, BarChart } fr
 import { z } from "zod";
 import { useState, useEffect } from "react";
 
-const formSchema = insertPlanSchema.extend({
+const formSchema = z.object({
+  name: z.string().min(1, "Nombre es requerido"),
+  description: z.string().optional(),
+  price: z.string(),
+  monthlyPrice: z.string().min(1, "Precio mensual es requerido"),
+  annualPrice: z.string().optional(),
+  billingFrequency: z.enum(['MONTHLY', 'ANNUAL']),
+  trialDays: z.number().min(0),
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+  isDefault: z.boolean(),
+  isActive: z.boolean(),
+  displayOrder: z.number(),
+  features: z.array(z.string()).optional(),
   modules: z.array(z.object({
     moduleType: z.string(),
     isIncluded: z.boolean(),
     itemLimit: z.number().nullable(),
-    canCreate: z.boolean(),
-    canEdit: z.boolean(),
-    canDelete: z.boolean(),
     features: z.array(z.string()).optional()
   })).optional()
 });
@@ -39,9 +48,6 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
   const [moduleConfig, setModuleConfig] = useState<Record<string, {
     isIncluded: boolean;
     itemLimit: number | null;
-    canCreate: boolean;
-    canEdit: boolean;
-    canDelete: boolean;
   }>>({});
   
   const [showPriceChangeModal, setShowPriceChangeModal] = useState(false);
@@ -63,10 +69,7 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
       Object.values(AVAILABLE_MODULES).forEach(module => {
         initialConfig[module.type] = {
           isIncluded: false,
-          itemLimit: module.defaultLimit,
-          canCreate: true,
-          canEdit: true,
-          canDelete: true
+          itemLimit: module.defaultLimit
         };
       });
 
@@ -76,17 +79,11 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
         const moduleType = planModule.moduleType || planModule.module_type;
         const isIncluded = planModule.isIncluded ?? planModule.is_included;
         const itemLimit = planModule.itemLimit ?? planModule.item_limit;
-        const canCreate = planModule.canCreate ?? planModule.can_create;
-        const canEdit = planModule.canEdit ?? planModule.can_edit;
-        const canDelete = planModule.canDelete ?? planModule.can_delete;
         
         if (initialConfig[moduleType]) {
           initialConfig[moduleType] = {
             isIncluded,
             itemLimit,
-            canCreate,
-            canEdit,
-            canDelete
           };
         }
       });
@@ -99,10 +96,7 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
       Object.values(AVAILABLE_MODULES).forEach(module => {
         initialConfig[module.type] = {
           isIncluded: false,
-          itemLimit: module.defaultLimit,
-          canCreate: true,
-          canEdit: true,
-          canDelete: true
+          itemLimit: module.defaultLimit
         };
       });
       setModuleConfig(initialConfig);
@@ -129,17 +123,20 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
 
   // Initialize module config and capture original prices
   useEffect(() => {
+    console.log('🔧 useEffect initializing moduleConfig...');
+    console.log('📋 AVAILABLE_MODULES:', AVAILABLE_MODULES);
+    
     const initialConfig: typeof moduleConfig = {};
     
     Object.values(AVAILABLE_MODULES).forEach(module => {
+      console.log('➕ Adding module to config:', module.type, module);
       initialConfig[module.type] = {
         isIncluded: false,
-        itemLimit: module.defaultLimit,
-        canCreate: true,
-        canEdit: true,
-        canDelete: true
+        itemLimit: module.defaultLimit
       };
     });
+    
+    console.log('✅ Built initialConfig:', initialConfig);
 
     // Load existing plan modules if editing
     if (plan) {
@@ -150,9 +147,12 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
       });
       loadPlanModules(plan.id);
     } else {
+      console.log('🔄 Setting moduleConfig with initialConfig:', initialConfig);
       setModuleConfig(initialConfig);
       setOriginalPrices(null);
     }
+    
+    console.log('🏁 useEffect completed');
   }, [plan]);
 
   const createMutation = useMutation({
@@ -183,9 +183,6 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
             moduleType,
             isIncluded: config.isIncluded,
             itemLimit: config.itemLimit,
-            canCreate: config.canCreate,
-            canEdit: config.canEdit,
-            canDelete: config.canDelete
           });
         });
 
@@ -255,9 +252,6 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
           moduleType,
           isIncluded: config.isIncluded,
           itemLimit: config.itemLimit,
-          canCreate: config.canCreate,
-          canEdit: config.canEdit,
-          canDelete: config.canDelete
         });
       });
 
@@ -286,6 +280,10 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
+    console.log('🚀 onSubmit called with data:', data);
+    console.log('📊 moduleConfig state:', moduleConfig);
+    console.log('📝 moduleConfig entries:', Object.entries(moduleConfig));
+    
     if (plan && originalPrices) {
       // Check if prices have changed
       const pricesChanged = originalPrices.monthlyPrice !== data.monthlyPrice || 
@@ -331,7 +329,7 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
   const getModuleIcon = (moduleType: string) => {
     const icons: Record<string, any> = {
       USERS: Users,
-      COMPANIES: Building,
+      CONTACTS: Building,
       CRM: Package,
       BILLING: DollarSign,
       INVENTORY: Package,
@@ -345,7 +343,15 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
 
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={form.handleSubmit(
+      (data) => {
+        console.log('✅ handleSubmit SUCCESS, calling onSubmit...');
+        onSubmit(data);
+      },
+      (errors) => {
+        console.log('❌ handleSubmit VALIDATION FAILED:', errors);
+      }
+    )} className="space-y-6">
       {/* Basic Information */}
       <Card>
         <CardHeader>
@@ -569,47 +575,6 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
                           </div>
                         )}
 
-                        <div className="space-y-2">
-                          <Label className="text-xs">Permisos</Label>
-                          <div className="flex flex-wrap gap-2">
-                            <div className="flex items-center space-x-1">
-                              <Switch
-                                checked={config.canCreate}
-                                onCheckedChange={(checked) => {
-                                  setModuleConfig(prev => ({
-                                    ...prev,
-                                    [module.type]: { ...prev[module.type], canCreate: checked }
-                                  }));
-                                }}
-                              />
-                              <span className="text-xs">Crear</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <Switch
-                                checked={config.canEdit}
-                                onCheckedChange={(checked) => {
-                                  setModuleConfig(prev => ({
-                                    ...prev,
-                                    [module.type]: { ...prev[module.type], canEdit: checked }
-                                  }));
-                                }}
-                              />
-                              <span className="text-xs">Editar</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <Switch
-                                checked={config.canDelete}
-                                onCheckedChange={(checked) => {
-                                  setModuleConfig(prev => ({
-                                    ...prev,
-                                    [module.type]: { ...prev[module.type], canDelete: checked }
-                                  }));
-                                }}
-                              />
-                              <span className="text-xs">Eliminar</span>
-                            </div>
-                          </div>
-                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -622,7 +587,20 @@ export default function PlanForm({ plan, onSuccess }: PlanFormProps) {
 
       {/* Submit Button */}
       <div className="flex justify-end space-x-2">
-        <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+        <Button 
+          type="submit" 
+          disabled={createMutation.isPending || updateMutation.isPending}
+          onClick={() => {
+            console.log('🔘 Button clicked!');
+            console.log('📝 Form state:', form.getValues());
+            console.log('❌ Form errors:', form.formState.errors);
+            console.log('✅ Form valid:', form.formState.isValid);
+            console.log('🔄 Mutations pending:', {
+              create: createMutation.isPending,
+              update: updateMutation.isPending
+            });
+          }}
+        >
           {plan ? 'Actualizar Plan' : 'Crear Plan'}
         </Button>
       </div>

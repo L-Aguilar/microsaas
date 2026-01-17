@@ -6,12 +6,12 @@ import { z } from "zod";
 // ============================================================================
 
 // Type definitions (without Drizzle database schemas)
-export type UserRole = 'SUPER_ADMIN' | 'BUSINESS_PLAN' | 'USER';
+export type UserRole = 'SUPER_ADMIN' | 'BUSINESS_ADMIN' | 'USER';
 export type CompanyStatus = 'LEAD' | 'ACTIVE' | 'INACTIVE' | 'BLOCKED' | 'DELETED';
 export type OpportunityType = 'NEW_CLIENT' | 'ADDITIONAL_PROJECT';
 export type OpportunityStatus = 'NEW' | 'IN_PROGRESS' | 'NEGOTIATION' | 'WON' | 'LOST';
 export type ActivityType = 'CALL' | 'MEETING' | 'NOTE';
-export type ModuleType = 'USERS' | 'COMPANIES' | 'CRM' | 'REPORTS';
+export type ModuleType = 'USERS' | 'CONTACTS' | 'CRM';
 export type BillingFrequency = 'MONTHLY' | 'ANNUAL';
 export type PlanStatus = 'ACTIVE' | 'INACTIVE' | 'DEPRECATED';
 export type ProductType = 'MODULE' | 'USER_ADDON' | 'FEATURE_ADDON' | 'STORAGE_ADDON';
@@ -26,10 +26,10 @@ export const AVAILABLE_MODULES = {
     hasLimits: true,
     defaultLimit: 5
   },
-  COMPANIES: {
-    name: 'Empresas',
-    type: 'COMPANIES' as const, 
-    description: 'Gestión de empresas y contactos comerciales',
+  CONTACTS: {
+    name: 'Contactos',
+    type: 'CONTACTS' as const, 
+    description: 'Gestión de contactos y clientes',
     hasLimits: true,
     defaultLimit: 100
   },
@@ -37,13 +37,6 @@ export const AVAILABLE_MODULES = {
     name: 'CRM',
     type: 'CRM' as const,
     description: 'Gestión de relaciones con clientes, oportunidades y actividades',
-    hasLimits: false,
-    defaultLimit: null
-  },
-  REPORTS: {
-    name: 'Reportes',
-    type: 'REPORTS' as const,
-    description: 'Análisis y reportes de rendimiento empresarial',
     hasLimits: false,
     defaultLimit: null
   }
@@ -165,7 +158,7 @@ export const insertUserSchema = z.object({
   email: z.string().email("Invalid email format"),
   phone: z.string().optional(),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  role: z.enum(['SUPER_ADMIN', 'BUSINESS_PLAN', 'USER']),
+  role: z.enum(['SUPER_ADMIN', 'BUSINESS_ADMIN', 'USER']),
   businessAccountId: z.string().optional(),
 });
 
@@ -208,7 +201,7 @@ export const insertActivitySchema = z.object({
 });
 
 export const insertModuleSchema = z.object({
-  type: z.enum(['USERS', 'COMPANIES', 'CRM', 'REPORTS']),
+  type: z.enum(['USERS', 'CONTACTS', 'CRM']),
   name: z.string().min(1, "Module name is required"),
   description: z.string().optional(),
   isActive: z.boolean().default(true),
