@@ -53,7 +53,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Health check route for Railway
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      jwtConfigured: !!process.env.JWT_SECRET,
+      dbConfigured: !!process.env.SUPABASE_DATABASE_URL,
+      corsOrigin: process.env.CORS_ORIGIN || 'default'
+    });
   });
 
   // Temporary debug endpoint
