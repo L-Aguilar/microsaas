@@ -18,9 +18,8 @@
     "url": "https://github.com/luisaguilar/BizFlowCRM.git"
   },
   "scripts": {
-    "build": "npm run build:server",
-    "build:server": "npx tsc --project server/tsconfig.json",
-    "start": "node server/dist/index.js",
+    "build": "echo 'No build step needed for Railway - using tsx directly'",
+    "start": "npx tsx server/index.ts",
     "dev": "npx tsx server/index.ts",
     "server": "npx tsx server/index.ts"
   },
