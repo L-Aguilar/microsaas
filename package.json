@@ -26,8 +26,7 @@
     "dev:client": "cd client && npm run dev",
     "server": "npx tsx server/index.ts",
     "test": "vitest",
-    "install:all": "npm install && cd client && npm install",
-    "postinstall": "cd client && npm install"
+    "install:all": "npm install && cd client && npm install"
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",

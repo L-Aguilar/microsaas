@@ -8,16 +8,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
+# Install dependencies (backend only)
 RUN npm install
 
-# Copy server source code and shared schema
+# Copy server source code
 COPY server/ ./server/
-COPY shared/ ./shared/
-COPY Procfile ./
 
 # Expose port
 EXPOSE 8080
 
-# Start the server
-CMD ["npm", "start"]
+# Start the server using the production start command
+CMD ["npm", "run", "start:prod"]
