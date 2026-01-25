@@ -39,7 +39,7 @@ export function useModulePermissions(moduleType: string) {
       console.log(`📊 Module permissions for ${moduleType}:`, data);
       return data;
     },
-    enabled: !!user?.businessAccountId && user?.role !== 'SUPER_ADMIN',
+    enabled: !!user?.businessAccountId,
     staleTime: 60000, // Cache for 1 minute
     retry: (failureCount, error) => {
       // Don't retry on auth errors

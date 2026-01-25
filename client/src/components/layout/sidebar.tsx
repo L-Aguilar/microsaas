@@ -26,8 +26,8 @@ const getNavigationForRole = (userRole: string, canViewUsers: boolean, canViewCo
   // For BUSINESS_ADMIN and USER roles - Module-based navigation
   // Only show features if user has permissions to view the respective modules
   
-  // Users module (only for BUSINESS_ADMIN)
-  if (userRole === 'BUSINESS_ADMIN' && canViewUsers) {
+  // Users module (based on permissions, not role)
+  if (canViewUsers) {
     baseNavigation.push(
       { name: "Usuarios", href: "/users", icon: Users }
     );

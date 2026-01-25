@@ -12,6 +12,7 @@ import CompanyForm from "@/components/forms/company-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useModulePermissions } from "@/hooks/use-module-permissions";
+import { RequireModulePage } from "@/components/auth/RequireModuleAccess";
 import { DataTable, Column } from "@/components/ui/data-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -227,7 +228,8 @@ export default function Companies() {
   }
 
   return (
-    <div className="space-y-6">
+    <RequireModulePage module="CONTACTS">
+      <div className="space-y-6">
       {/* Información de límites del plan */}
       {itemLimit && (
         <Card className={`${currentCount >= itemLimit ? 'border-red-200 bg-red-50' : 
@@ -405,6 +407,7 @@ export default function Companies() {
         confirmText="Eliminar"
         cancelText="Cancelar"
       />
-    </div>
+      </div>
+    </RequireModulePage>
   );
 }

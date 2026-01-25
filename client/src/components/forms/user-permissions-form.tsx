@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,24 +56,24 @@ const PERMISSION_TYPES = [
 
 export default function UserPermissionsForm({ user, isOpen, onClose, onSuccess }: UserPermissionsFormProps) {
   const [permissions, setPermissions] = useState<Record<string, Record<string, boolean>>>({});
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  // Load current permissions
-  useEffect(() => {
-    if (isOpen && user.id) {
-      loadPermissions();
-    }
-  }, [isOpen, user.id]);
-
-  const loadPermissions = async () => {
-    setLoading(true);
-    try {
+  // Load current permissions using React Query
+  const { data: userPerms, isLoading: loading, error } = useQuery({
+    queryKey: ["/api/users", user.id, "permissions"],
+    queryFn: async () => {
       const response = await apiRequest("GET", `/api/users/${user.id}/permissions`);
-      const userPerms = await response.json();
-      
-      // Initialize with default values if no permissions exist
+      return await response.json();
+    },
+    enabled: isOpen && !!user.id,
+    staleTime: 0, // Always refetch when component opens
+  });
+
+  // Update local permissions state when data changes
+  useEffect(() => {
+    if (userPerms) {
       const initialPerms: Record<string, Record<string, boolean>> = {};
       MODULES.forEach(module => {
         initialPerms[module.key] = {
@@ -82,19 +83,21 @@ export default function UserPermissionsForm({ user, isOpen, onClose, onSuccess }
           canDelete: userPerms[module.key]?.canDelete ?? false
         };
       });
-      
       setPermissions(initialPerms);
-    } catch (error) {
+    }
+  }, [userPerms]);
+
+  // Handle loading error
+  useEffect(() => {
+    if (error) {
       console.error("Error loading permissions:", error);
       toast({
         title: "Error",
         description: "No se pudieron cargar los permisos del usuario",
         variant: "destructive"
       });
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [error, toast]);
 
   const handlePermissionChange = (moduleKey: string, permissionKey: string, value: boolean) => {
     setPermissions(prev => ({
@@ -114,10 +117,21 @@ export default function UserPermissionsForm({ user, isOpen, onClose, onSuccess }
       });
 
       if (response.ok) {
+        // Invalidate permissions cache for this user
+        await queryClient.invalidateQueries({ 
+          queryKey: ["/api/users", user.id, "permissions"] 
+        });
+        
+        // Also invalidate users list in case permissions affect display
+        await queryClient.invalidateQueries({ 
+          queryKey: ["/api/users"] 
+        });
+
         toast({
           title: "Éxito",
           description: "Permisos actualizados correctamente"
         });
+        
         onSuccess?.();
         onClose();
       } else {

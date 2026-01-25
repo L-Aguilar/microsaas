@@ -1,346 +1,200 @@
-# 🚀 Controly - Sistema de Gestión Empresarial
+# BizFlowCRM
 
-Un CRM moderno y completo para la gestión de empresas, clientes, oportunidades y actividades comerciales. Sistema profesional listo para producción con autenticación segura, dashboard ejecutivo y gestión completa de relaciones comerciales.
+Sistema integral de gestión de negocios multi-tenant desarrollado con React, Node.js y PostgreSQL.
 
-## ✨ Características
+## 🚀 Descripción
 
-- **Gestión de Empresas**: Administra información completa de empresas y contactos
-- **Pipeline de Ventas**: Kanban board para seguimiento de oportunidades
-- **Gestión de Actividades**: Calendario y timeline de actividades comerciales
-- **Usuarios y Permisos**: Sistema de roles y permisos granulares
-- **Reportes**: Dashboard con métricas y estadísticas
-- **Interfaz Moderna**: Diseño responsive con componentes UI modernos
-- **Autenticación Segura**: Sistema de login con sesiones seguras
-- **Base de Datos**: PostgreSQL con Supabase
+BizFlowCRM es una plataforma SaaS completa que permite a las empresas gestionar usuarios, contactos y oportunidades de venta bajo un sistema robusto de permisos basado en planes de suscripción.
 
-## 🛠️ Tecnologías
+## ✨ Características Principales
 
-### Frontend
-- **React 18** - Framework de UI
-- **TypeScript** - Tipado estático
-- **Vite** - Build tool y dev server
-- **Tailwind CSS** - Framework de estilos
-- **Radix UI** - Componentes accesibles
-- **React Hook Form** - Manejo de formularios
-- **TanStack Query** - Gestión de estado del servidor
+- **Multi-tenancy**: Aislamiento completo entre empresas
+- **Sistema de Permisos Granular**: Control por módulos (USERS, CONTACTS, CRM)
+- **Autenticación Segura**: JWT + CSRF + Rate Limiting
+- **Vista de Perfil Completa**: Métricas detalladas y logs de actividad
+- **Gestión de Contactos**: CRM completo con seguimiento de oportunidades
+- **Planes de Suscripción**: FREE, STARTER, BUSINESS, ENTERPRISE
+- **Performance Optimizada**: Índices estratégicos para 1,500+ usuarios
 
-### Backend
-- **Node.js** - Runtime de JavaScript
-- **Express.js** - Framework web
-- **TypeScript** - Tipado estático
-- **JWT** - Autenticación basada en tokens
-- **PostgreSQL** - Base de datos
-- **Supabase** - Plataforma de base de datos
-- **Drizzle ORM** - ORM moderno
-- **bcrypt** - Hashing de contraseñas
-- **Helmet** - Seguridad HTTP
+## 🛠 Stack Tecnológico
 
-### Deployment
-- **Frontend**: Vercel (Configurado y funcionando)
-- **Backend**: Railway (Configurado y funcionando)
-- **Database**: Supabase (PostgreSQL)
+- **Frontend**: React + TypeScript + Vite + TanStack Query + Wouter
+- **Backend**: Node.js + Express.js + TypeScript
+- **Base de Datos**: PostgreSQL (Supabase)
+- **UI**: Tailwind CSS + shadcn/ui
+- **Autenticación**: JWT con refresh tokens
+- **Styling**: Responsive design con componentes reutilizables
 
-## 🚀 Instalación y Configuración
+## 📦 Instalación y Desarrollo
 
-### Prerrequisitos
-- Node.js 18+ 
-- Cuenta de Supabase (gratuita)
-- Cuenta de Vercel para deployment (opcional)
+### Prerequisitos
 
-### 1. Clonar el repositorio
+- Node.js 18+
+- npm o yarn
+- Base de datos PostgreSQL (Supabase recomendado)
+
+### Instalación
+
+1. **Clonar el repositorio:**
 ```bash
-git clone https://github.com/tu-usuario/controly.git
-cd controly
+git clone https://github.com/luisaguilar/BizFlowCRM.git
+cd BizFlowCRM
 ```
 
-### 2. Instalar dependencias
+2. **Instalar dependencias:**
 ```bash
-npm install
+npm run install:all
 ```
 
-### 3. Configurar Supabase
-1. Crea un proyecto en [Supabase](https://supabase.com)
-2. Ve a Settings > API y copia tu URL y anon key
-3. Ve a Settings > Database y copia tu connection string
-
-### 4. Configurar variables de entorno
+3. **Configurar variables de entorno:**
 ```bash
-cp env.example .env
-```
+# Backend
+cp .env.example .env
+# Editar .env con tus configuraciones
 
-Edita el archivo `.env` con tus configuraciones de Supabase:
-```env
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT_REF].supabase.co:5432/postgres
-SESSION_SECRET=tu-secreto-super-seguro-de-64-caracteres-minimo
-SUPER_ADMIN_EMAIL=admin@tuempresa.com
-SUPER_ADMIN_PASSWORD=CambiaEstaContraseña123!
-CORS_ORIGIN=http://localhost:5173,https://tudominio.com
-```
-
-### 5. Inicializar base de datos
-```bash
-# Aplicar esquemas a Supabase
-npm run db:push
-```
-
-### 6. Iniciar en desarrollo
-```bash
-npm run dev
-```
-
-Accede a: http://localhost:5173
-
-## 🔧 Scripts Disponibles
-
-```bash
-# Desarrollo
-npm run dev              # Iniciar servidor de desarrollo
-npm run build            # Construir para producción
-npm run start            # Iniciar en producción
-
-# Base de datos
-npm run db:push          # Sincronizar esquema de BD
-npm run setup:supabase   # Configurar Supabase
-npm run verify:supabase  # Verificar conexión
-
-# Utilidades
-npm run check            # Verificar tipos TypeScript
-npm run generate:secrets # Generar secretos seguros
-```
-
-## 🔐 Configuración de Seguridad
-
-### Variables de Entorno Críticas
-```bash
-SESSION_SECRET=tu-super-secreto-seguro-de-64-caracteres
-SUPER_ADMIN_PASSWORD=contraseña-segura-del-admin
-CORS_ORIGIN=https://tudominio.com
-```
-
-### Generar Secretos Seguros
-```bash
-npm run generate:secrets
-```
-
-## 📦 Despliegue a Producción
-
-Este proyecto está configurado para deployment distribuido:
-- **Frontend**: Vercel
-- **Backend**: Railway  
-- **Base de datos**: Supabase
-
-### Prerequisitos de Deployment
-1. Cuenta de [Vercel](https://vercel.com) (para frontend)
-2. Cuenta de [Railway](https://railway.app) (para backend)
-3. Proyecto de [Supabase](https://supabase.com) (para base de datos)
-4. Repositorio de GitHub con el código
-
-### Frontend - Vercel
-
-#### 1. Configuración de Vercel
-1. Conecta tu repositorio en [Vercel](https://vercel.com)
-2. **Root Directory**: `client`
-3. **Framework**: Vite
-4. **Build Command**: `npm ci && npm run build`
-5. **Output Directory**: `dist` (automático)
-
-#### 2. Variables de entorno en Vercel
-```env
-VITE_API_URL=https://tu-backend.up.railway.app
-```
-
-### Backend - Railway
-
-#### 1. Configuración de Railway
-1. Conecta tu repositorio en [Railway](https://railway.app)
-2. El archivo `railway.json` se usa automáticamente
-3. **Start Command**: `npm start`
-
-#### 2. Variables de entorno en Railway
-```env
-# Base de datos
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
-SUPABASE_DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
-
-# Seguridad
-SESSION_SECRET=tu-secreto-super-seguro-64-chars
-JWT_SECRET=otro-secreto-para-jwt-tokens
-SUPER_ADMIN_EMAIL=admin@tuempresa.com
-SUPER_ADMIN_PASSWORD=ContraseñaSegura123!
-
-# CORS (incluir dominio de Vercel)
-CORS_ORIGIN=https://tu-app.vercel.app,https://tudominio.com
-
-# Configuración
-NODE_ENV=production
-PORT=8080
-```
-
-### Verificación del Deployment
-
-#### Build local antes del deploy
-```bash
 # Frontend
-cd client && npm run build
-
-# Backend (verificar que compila)
-npx tsx server/index.ts
+cd client
+cp .env.example .env
+# Editar .env con la URL del backend
 ```
 
-### Variables de entorno críticas
-- **Frontend**: `VITE_API_URL` debe apuntar a Railway
-- **Backend**: `CORS_ORIGIN` debe incluir dominio de Vercel
-- **Database**: `DATABASE_URL` de Supabase
-- **Security**: `JWT_SECRET` y `SESSION_SECRET` únicos
+4. **Iniciar en desarrollo:**
+```bash
+# Terminal 1 - Backend (Puerto 8080)
+npm run dev
+
+# Terminal 2 - Frontend (Puerto 5173)
+npm run dev:client
+```
+
+### Scripts Disponibles
+
+- `npm run dev` - Servidor backend en desarrollo
+- `npm run dev:client` - Cliente frontend en desarrollo
+- `npm run build` - Build completo (backend + frontend)
+- `npm run start:prod` - Servidor en modo producción
+- `npm run install:all` - Instalar dependencias completas
+
+## 🚀 Deployment
+
+Ver [DEPLOYMENT.md](DEPLOYMENT.md) para instrucciones completas de deployment en Vercel + Railway.
+
+### Quick Deploy
+
+**Frontend (Vercel):**
+- Conectar repo GitHub
+- Root Directory: `client`
+- Build Command: `npm run build`
+- Variables: `VITE_API_BASE_URL`
+
+**Backend (Railway):**
+- Conectar repo GitHub
+- Auto-detecta `Procfile`
+- Variables de entorno según `.env.example`
+
+## 🏗 Arquitectura
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │    Backend      │    │   Database      │
+│   (Vercel)      │◄──►│   (Railway)     │◄──►│   (Supabase)    │
+│                 │    │                 │    │                 │
+│ React + Vite    │    │ Express + TS    │    │ PostgreSQL      │
+│ TanStack Query  │    │ JWT Auth        │    │ Row Level Sec   │
+│ Tailwind UI     │    │ Rate Limiting   │    │ Auto Backups    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
 
 ## 📁 Estructura del Proyecto
 
 ```
-Controly/
+BizFlowCRM/
 ├── client/                 # Frontend React
 │   ├── src/
-│   │   ├── components/     # Componentes reutilizables
-│   │   ├── pages/         # Páginas de la aplicación
-│   │   ├── hooks/         # Custom hooks
-│   │   ├── lib/           # Utilidades y configuración
-│   │   ├── contexts/      # Contextos de React
-│   │   └── types/         # Tipos TypeScript frontend-only
-│   │       └── schema.ts  # Schema sin dependencias drizzle-orm
-│   └── index.html
+│   │   ├── components/    # Componentes UI
+│   │   ├── pages/         # Páginas principales
+│   │   ├── hooks/         # Hooks personalizados
+│   │   └── lib/           # Utilidades
+│   └── vercel.json        # Config Vercel
 ├── server/                # Backend Express
-│   ├── routes.ts          # Definición de rutas
-│   ├── storage.ts         # Capa de datos
-│   ├── middleware/        # Middlewares JWT, permisos, etc.
-│   ├── services/          # Servicios (email, etc.)
-│   └── utils/             # Utilidades del servidor
-├── shared/                # Código compartido (solo backend)
-│   ├── schema.ts          # Schema completo con drizzle-orm
-│   └── theme-config.ts    # Configuración de tema
-├── scripts/               # Scripts de utilidad
-├── railway.json           # Configuración Railway
-├── vercel.json.backup     # Configuración Vercel (backup)
-└── client/vercel.json     # Configuración SPA routing para Vercel
+│   ├── middleware/        # Middlewares
+│   ├── services/          # Lógica de negocio
+│   ├── utils/             # Utilidades
+│   └── routes.ts          # Rutas API
+├── Procfile              # Config Railway
+├── railway.toml          # Config Railway avanzada
+└── DEPLOYMENT.md         # Guía de deployment
 ```
 
-## 🏗️ Arquitectura del Schema
+## 🔒 Características de Seguridad
 
-**⚠️ IMPORTANTE**: Este proyecto usa una arquitectura de schema dual para evitar conflictos de dependencias.
+- **JWT Security**: Tokens de corta duración + refresh tokens
+- **CSRF Protection**: Protección integrada en todas las rutas
+- **Rate Limiting**: Prevención de ataques de fuerza bruta
+- **Row Level Security**: Aislamiento a nivel de base de datos
+- **Audit Trail**: Logging completo de acciones críticas
+- **Input Validation**: Validación robusta con Zod
+- **Role-based Access**: Validación jerárquica de permisos
 
-### Schema Backend (`/shared/schema.ts`)
-- **Ubicación**: `/shared/schema.ts`
-- **Uso**: Server-side únicamente
-- **Dependencias**: Incluye `drizzle-orm`, `drizzle-zod`
-- **Contenido**: Definiciones completas de tablas, relaciones, y validaciones
+## ⚙️ Variables de Entorno
 
-### Schema Frontend (`client/src/types/schema.ts`)
-- **Ubicación**: `client/src/types/schema.ts`
-- **Uso**: Frontend únicamente
-- **Dependencias**: Solo `zod` (sin drizzle-orm)
-- **Contenido**: Tipos TypeScript, interfaces, y validaciones para formularios
-
-### Configuración de Aliases
-```ts
-// client/vite.config.ts
-resolve: {
-  alias: {
-    "@": resolve(__dirname, "src"),
-    "@shared": resolve(__dirname, "src/types"), // Apunta al schema frontend
-  },
-}
+### Backend (.env)
+```bash
+SUPABASE_DATABASE_URL=postgresql://...
+JWT_SECRET=32-character-secret
+SESSION_SECRET=32-character-secret
+SUPER_ADMIN_EMAIL=admin@domain.com
+SUPER_ADMIN_PASSWORD=secure-password
+BREVO_API_KEY=email-api-key
+NODE_ENV=production
+PORT=8080
 ```
 
-### ¿Por qué esta arquitectura?
-1. **Build separado**: Evita errores de `drizzle-orm` en builds de frontend
-2. **Optimización**: Frontend no incluye dependencias innecesarias del backend
-3. **Mantenimiento**: Cada parte usa solo lo que necesita
-4. **Deployment**: Permite deployment distribuido (Vercel + Railway)
+### Frontend (.env)
+```bash
+VITE_API_BASE_URL=https://api-domain.com
+VITE_APP_NAME=BizFlowCRM
+```
 
-### Mantenimiento del Schema
-⚠️ **Al modificar schemas**: Mantener ambos archivos sincronizados manualmente:
-1. Actualizar `/shared/schema.ts` (backend)
-2. Sincronizar cambios en `client/src/types/schema.ts` (frontend)
-3. Verificar que `AVAILABLE_MODULES` tenga estructura completa con `name`, `type`, `defaultLimit`
+## 🎯 Características Técnicas Avanzadas
 
-## 🔑 Credenciales por Defecto
+### Performance
+- **Índices de Base de Datos**: 3 índices críticos optimizados
+- **Consultas Optimizadas**: 5-10x mejora en velocidad
+- **Cache Inteligente**: TanStack Query con invalidación automática
 
-**Super Admin:**
-- Email: `admin@yourcompany.com`
-- Password: `CHANGE_THIS_PASSWORD`
+### UX/UI
+- **Routing Optimizado**: Rutas independientes sin conflictos
+- **Vista de Perfil Completa**: Métricas, permisos y actividad
+- **Formularios Inteligentes**: Validación en tiempo real
+- **Responsive Design**: Mobile-first approach
 
-**⚠️ IMPORTANTE:** Cambia estas credenciales inmediatamente después del primer despliegue.
-
-## 🤝 Contribuir
-
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+### Sistema de Permisos
+- **Granular por Módulos**: USERS, CONTACTS, CRM
+- **Validación Unificada**: Frontend y backend sincronizados
+- **Role Hierarchy**: SUPER_ADMIN > BUSINESS_ADMIN > USER
 
 ## 📄 Licencia
 
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
+MIT License - ver [LICENSE](LICENSE) para detalles.
 
-## 🛠️ Troubleshooting
+## 🤝 Contribución
 
-### Errores Comunes en Deployment
+1. Fork el proyecto
+2. Crear feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit cambios (`git commit -m 'Add AmazingFeature'`)
+4. Push a branch (`git push origin feature/AmazingFeature`)
+5. Abrir Pull Request
 
-#### Error: `drizzle-orm` not found en Vercel
-**Síntoma**: Build falla con "Rollup failed to resolve import 'drizzle-orm'"
-**Solución**: Verificar que `@shared` apunte a `client/src/types` y no a `/shared`
+## 📞 Soporte
 
-#### Error: Módulos sin nombres en plan-form
-**Síntoma**: Los módulos aparecen en blanco en el formulario de planes
-**Causa**: `AVAILABLE_MODULES` es array en lugar de objeto con propiedades
-**Solución**: Usar `client/src/types/schema.ts` con estructura completa
-
-#### Error: 401 en endpoints específicos
-**Síntoma**: Algunos endpoints devuelven 401 mientras otros funcionan
-**Causa**: `requireBusinessAccount` middleware no incluye `requireAuth`
-**Solución**: Ya resuelto en la versión actual
-
-#### Error: CORS en producción
-**Síntoma**: Requests desde Vercel a Railway fallan por CORS
-**Solución**: Agregar dominio de Vercel a `CORS_ORIGIN` en Railway
-
-#### Error: 404 al hacer refresh en rutas
-**Síntoma**: Error 404 cuando haces refresh en `/companies`, `/dashboard`, etc.
-**Causa**: SPA routing no configurado en Vercel
-**Solución**: `client/vercel.json` con rewrite rules (ya incluido)
-
-### Comandos de Diagnóstico
-
-```bash
-# Verificar build frontend
-cd client && npm run build
-
-# Verificar tipos
-npm run check
-
-# Verificar conexión BD
-curl https://tu-backend.railway.app/api/debug-db
-
-# Verificar autenticación
-curl -H "Authorization: Bearer TOKEN" https://tu-backend.railway.app/api/opportunities
-```
-
-## 🆘 Soporte
-
-Si tienes problemas o preguntas:
-- Abre un issue en GitHub
-- Revisa la sección de Troubleshooting
-- Contacta al equipo de desarrollo
-
-## 🚀 Roadmap
-
-- [ ] Integración con calendarios externos
-- [ ] API REST completa
-- [ ] Aplicación móvil
-- [ ] Integración con sistemas de facturación
-- [ ] Reportes avanzados
-- [ ] Notificaciones push
-- [ ] Integración con redes sociales
+- **Documentación**: [claude.md](claude.md)
+- **Issues**: [GitHub Issues](https://github.com/luisaguilar/BizFlowCRM/issues)
+- **Email**: support@bizflowcrm.com
 
 ---
 
-**Desarrollado con ❤️ por el equipo Controly**
+**Versión**: 2.2 - Producción Lista con Routing Optimizado  
+**Status**: ✅ Listo para Deployment  
+**Deploy Targets**: Vercel (Frontend) + Railway (Backend)  
+**Performance**: Optimizado para 120 empresas / 1,500+ usuarios

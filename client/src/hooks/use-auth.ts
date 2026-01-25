@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { User } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { getStoredUser, setStoredUser, getStoredJwtToken, setStoredJwtToken, clearAuthStorage, refreshAuthState } from "@/lib/auth";
+import { clearCsrfToken } from "@/lib/csrf";
 import { useToast } from "./use-toast";
 
 export function useAuth() {
@@ -27,7 +28,7 @@ export function useAuth() {
   // });
 
   // Simplified approach without React Query
-  const currentUser = null; // Disable React Query override
+  // const currentUser = null; // Disable React Query override
   const userLoading = false;
 
   useEffect(() => {
@@ -126,21 +127,48 @@ export function useAuth() {
       console.log("👤 Login user data:", data.user);
       console.log("🔑 User businessAccountId:", data.user?.businessAccountId);
       
-      // Store JWT token and user data
-      setStoredJwtToken(data.token);
-      setUser(data.user);
+      // Extract token - should be at data.token
+      const token = data?.token;
+      if (!token) {
+        console.error("❌ No token in login response!");
+        toast({
+          title: "Error",
+          description: "Error de autenticación: sin token",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Store JWT token FIRST
+      console.log("💾 Storing JWT token...");
+      setStoredJwtToken(token);
+      
+      // Then store user data
+      console.log("💾 Storing user data...");
       setStoredUser(data.user);
+      
+      // Update local state
+      setUser(data.user);
+      
+      // Verify storage
+      const storedToken = localStorage.getItem('crm_jwt_token');
+      const storedUserData = localStorage.getItem('crm_auth_user');
+      console.log("✅ Verification - token in storage:", !!storedToken);
+      console.log("✅ Verification - user in storage:", !!storedUserData);
+      
       // Invalidar la query del usuario actual para forzar re-render
       queryClient.invalidateQueries({ queryKey: ["auth", "currentUser"] });
-      
-      // Immediate redirect to dashboard after successful login
-      console.log("🚀 Login successful, redirecting to dashboard immediately");
-      setLocation("/");
       
       toast({
         title: "Bienvenido",
         description: "Has iniciado sesión correctamente",
       });
+      
+      // Redirect AFTER a brief delay to ensure storage is synced
+      setTimeout(() => {
+        console.log("🚀 Login successful, redirecting to dashboard");
+        setLocation("/");
+      }, 100);
     },
     onError: (error: any) => {
       console.log("🚨 Login error:", error);
@@ -192,6 +220,7 @@ export function useAuth() {
       // Clear all auth state
       setUser(null);
       clearAuthStorage(); // Use the robust cleanup function
+      clearCsrfToken(); // Clear cached CSRF token
       
       // Clear React Query cache completely
       queryClient.clear();

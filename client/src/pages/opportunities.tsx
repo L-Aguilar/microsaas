@@ -12,6 +12,7 @@ import OpportunityForm from "@/components/forms/opportunity-form";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useModulePermissions } from "@/hooks/use-module-permissions";
+import { RequireModulePage } from "@/components/auth/RequireModuleAccess";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { DataTable, Column } from "@/components/ui/data-table";
@@ -308,7 +309,8 @@ export default function Opportunities() {
   }
 
   return (
-    <div className="space-y-6">
+    <RequireModulePage module="CRM">
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Oportunidades</h1>
@@ -528,6 +530,7 @@ export default function Opportunities() {
         confirmText="Eliminar"
         cancelText="Cancelar"
       />
-    </div>
+      </div>
+    </RequireModulePage>
   );
 }

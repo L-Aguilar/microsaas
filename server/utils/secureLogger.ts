@@ -38,8 +38,28 @@ export const auditLogger = winston.createLogger({
   ]
 });
 
+// Enhanced security audit interface
+export interface SecurityEvent {
+  level: 'info' | 'warn' | 'error' | 'debug';
+  action: string;
+  details?: {
+    userId?: string;
+    businessAccountId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+    targetUserId?: string;
+    targetRole?: string;
+    oldRole?: string;
+    newRole?: string;
+    permissions?: string[];
+    modules?: string[];
+    error?: string;
+    [key: string]: any;
+  };
+}
+
 // Helper functions for secure logging
-export const secureLog = {
+export const secureLogLegacy = {
   info: (message: string, meta?: any) => {
     logger.info(message, sanitizeMeta(meta));
   },
@@ -52,16 +72,36 @@ export const secureLog = {
     logger.warn(message, sanitizeMeta(meta));
   },
   
-  // For security-related events
-  audit: (event: string, userId?: string, details?: any) => {
-    auditLogger.info('Security Event', {
-      event,
-      userId,
+  debug: (message: string, meta?: any) => {
+    logger.debug(message, sanitizeMeta(meta));
+  },
+  
+  // Enhanced security audit function
+  audit: (event: SecurityEvent) => {
+    const sanitizedEvent = {
+      ...event,
       timestamp: new Date().toISOString(),
-      details: sanitizeMeta(details)
-    });
+      details: sanitizeMeta(event.details)
+    };
+    
+    // Log to both regular log and security audit log
+    logger[event.level](`SECURITY_EVENT: ${event.action}`, sanitizedEvent);
+    auditLogger.info('Security Audit', sanitizedEvent);
   }
 };
+
+// Main secure logging function with enhanced security event interface
+export function secureLog(event: SecurityEvent): void {
+  const sanitizedEvent = {
+    ...event,
+    timestamp: new Date().toISOString(),
+    details: sanitizeMeta(event.details)
+  };
+  
+  // Log to both regular log and security audit log
+  logger[event.level](`SECURITY_EVENT: ${event.action}`, sanitizedEvent);
+  auditLogger.info('Security Audit', sanitizedEvent);
+}
 
 // Sanitize metadata to remove sensitive information
 function sanitizeMeta(meta: any): any {

@@ -657,7 +657,7 @@ export class DatabaseStorage implements IStorage {
       RETURNING id, name, plan, is_active, deleted_at, created_at, updated_at;
     `, [
       accountData.name,
-      accountData.plan || 'BUSINESS_ADMIN',
+      accountData.plan || 'Starter',
       accountData.isActive ?? true
     ]);
     

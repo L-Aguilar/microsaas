@@ -1,6 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { buildApiUrl } from "./api";
 import { getStoredJwtToken } from "./auth";
+import { addCsrfTokenToHeaders, handleCsrfError, clearCsrfToken } from "./csrf";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -26,6 +27,7 @@ export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
+  retryOnCsrfError: boolean = true,
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   
@@ -39,18 +41,33 @@ export async function apiRequest(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  // Add CSRF token for state-changing requests (except auth endpoints)
+  const isAuthEndpoint = url.includes('/api/auth/');
+  const headersWithCsrf = isAuthEndpoint 
+    ? headers 
+    : await addCsrfTokenToHeaders(method, headers);
+
   // Build full API URL if it's an API endpoint
   const fullUrl = url.startsWith('/api/') ? buildApiUrl(url) : url;
 
-  const res = await fetch(fullUrl, {
-    method,
-    headers,
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: 'include', // Include cookies for session-based auth
-  });
+  try {
+    const res = await fetch(fullUrl, {
+      method,
+      headers: headersWithCsrf,
+      body: data ? JSON.stringify(data) : undefined,
+      credentials: 'include', // Include cookies for session-based auth
+    });
 
-  await throwIfResNotOk(res);
-  return res;
+    await throwIfResNotOk(res);
+    return res;
+  } catch (error) {
+    // Handle CSRF token validation errors with retry
+    if (retryOnCsrfError && handleCsrfError(error)) {
+      console.log('🔄 Retrying request with fresh CSRF token');
+      return await apiRequest(method, url, data, false); // Prevent infinite retry
+    }
+    throw error;
+  }
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
@@ -69,10 +86,13 @@ export const getQueryFn: <T>(options: {
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
+
+    // Note: GET requests typically don't need CSRF tokens
+    // but we include the session cookies for the CSRF middleware to work
     
     const res = await fetch(fullUrl, {
       headers,
-      credentials: 'include', // Include cookies for session-based auth
+      credentials: 'include', // Include cookies for session-based auth (CSRF session)
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

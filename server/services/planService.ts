@@ -290,7 +290,7 @@ export class PlanService {
       case 'USERS':
         return `
           SELECT id FROM users 
-          WHERE business_account_id = $1 AND (deleted_at IS NULL OR deleted_at > NOW())
+          WHERE business_account_id = $1
           FOR UPDATE
         `;
       case 'COMPANIES':

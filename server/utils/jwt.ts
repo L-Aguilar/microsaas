@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 // User type definition for JWT (avoiding @shared dependency)
 interface User {
@@ -27,20 +28,26 @@ export interface JWTPayload {
   email: string;
   role: string;
   businessAccountId?: string;
+  csrfNonce: string; // CSRF nonce embedded in JWT for serverless compatibility
 }
 
 /**
- * Generate JWT token for user
+ * Generate JWT token for user with embedded CSRF nonce
+ * This provides serverless-compatible CSRF protection
  */
 export function generateToken(user: User): string {
+  // Generate cryptographically secure CSRF nonce
+  const csrfNonce = crypto.randomBytes(32).toString('hex');
+  
   const payload: JWTPayload = {
     userId: user.id,
     email: user.email,
     role: user.role,
-    businessAccountId: user.businessAccountId || undefined
+    businessAccountId: user.businessAccountId || undefined,
+    csrfNonce // Embed CSRF nonce in JWT
   };
 
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  return jwt.sign(payload, JWT_SECRET!, { expiresIn: JWT_EXPIRY });
 }
 
 /**
@@ -54,7 +61,7 @@ export function verifyToken(token: string): JWTPayload | null {
       return null;
     }
     
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+    return jwt.verify(token, JWT_SECRET!) as JWTPayload;
   } catch (error) {
     console.error('JWT verification failed:', error);
     return null;
@@ -78,7 +85,7 @@ export function generateRefreshToken(user: User): string {
     type: 'refresh'
   };
   
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY });
+  return jwt.sign(payload, JWT_SECRET!, { expiresIn: REFRESH_TOKEN_EXPIRY });
 }
 
 /**

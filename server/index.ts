@@ -5,7 +5,7 @@ import { registerRoutes } from "./routes";
 function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
-    minute: "2-digit", 
+    minute: "2-digit",
     second: "2-digit",
     hour12: true,
   });
@@ -20,7 +20,7 @@ const app = express();
 // Rate limiting
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 1000, // limit each IP to 1000 requests per windowMs (relaxed for dev)
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -28,7 +28,7 @@ const generalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // limit each IP to 50 login attempts per windowMs (increased for testing)
+  max: 1000, // limit each IP to 1000 login attempts per windowMs (relaxed for dev)
   message: 'Too many authentication attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -43,7 +43,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: process.env.NODE_ENV === 'development' 
+      scriptSrc: process.env.NODE_ENV === 'development'
         ? ["'self'", "'unsafe-inline'", "'unsafe-eval'"]
         : ["'self'", "'sha256-SECURE_HASH'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -71,7 +71,7 @@ app.use(helmet({
 app.use(cors({
   origin: (origin, callback) => {
     console.log(`🌐 CORS check for origin: ${origin}`);
-    
+
     // In development, allow localhost
     if (process.env.NODE_ENV === 'development') {
       if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
@@ -79,23 +79,23 @@ app.use(cors({
         return callback(null, true);
       }
     }
-    
-    const allowedOrigins = process.env.CORS_ORIGIN ? 
-      process.env.CORS_ORIGIN.split(',').map(url => url.trim()) : 
+
+    const allowedOrigins = process.env.CORS_ORIGIN ?
+      process.env.CORS_ORIGIN.split(',').map(url => url.trim()) :
       [];
-    
+
     console.log(`📋 Allowed origins: ${JSON.stringify(allowedOrigins)}`);
-    
+
     // Allow same-origin requests (no origin header)
     if (!origin) {
       console.log('✅ CORS allowed: Same-origin request');
       return callback(null, true);
     }
-    
+
     // Auto-allow Vercel deployments (temporary fix) + specific origins
-    if (origin.includes('.vercel.app') || 
-        allowedOrigins.includes(origin) || 
-        origin === 'https://microsaas-theta.vercel.app') {
+    if (origin.includes('.vercel.app') ||
+      allowedOrigins.includes(origin) ||
+      origin === 'https://microsaas-theta.vercel.app') {
       console.log('✅ CORS allowed: Verified origin');
       callback(null, true);
     } else {
@@ -106,10 +106,11 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
+    'Content-Type',
+    'Authorization',
     'x-session-id',
     'x-requested-with',
+    'x-csrf-token',
     'origin',
     'accept'
   ],
@@ -171,7 +172,7 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  
+
   // Log critical environment variables for debugging
   console.log('🔧 Environment check:');
   console.log(`📡 PORT: ${port}`);
@@ -180,7 +181,7 @@ app.use((req, res, next) => {
   console.log(`🌐 CORS_ORIGIN: ${process.env.CORS_ORIGIN || 'not_set'}`);
   console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV}`);
   console.log(`📧 SUPER_ADMIN_EMAIL: ${process.env.SUPER_ADMIN_EMAIL || 'not_set'}`);
-  
+
   server.listen({
     port,
     host: "0.0.0.0",

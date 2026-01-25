@@ -16,6 +16,13 @@ export interface EmailParams {
   textContent?: string;
 }
 
+export interface BrevoTemplateParams {
+  to: string;
+  toName?: string;
+  templateId: number;
+  params: Record<string, string>;
+}
+
 export async function sendEmail(params: EmailParams): Promise<boolean> {
   if (!process.env.BREVO_API_KEY) {
     console.error('BREVO_API_KEY environment variable is not set');
@@ -60,7 +67,64 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
   }
 }
 
-// Helper function for common use cases
+/**
+ * Send email using Brevo template with parameters
+ * @param params - Template parameters including templateId and variable values
+ */
+export async function sendEmailWithTemplate(params: BrevoTemplateParams): Promise<boolean> {
+  if (!process.env.BREVO_API_KEY) {
+    console.error('BREVO_API_KEY environment variable is not set');
+    return false;
+  }
+
+  try {
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    
+    sendSmtpEmail.to = [
+      {
+        email: params.to,
+        name: params.toName || 'Usuario'
+      }
+    ];
+    
+    sendSmtpEmail.templateId = params.templateId;
+    sendSmtpEmail.params = params.params;
+
+    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    
+    console.log('✅ Template email sent successfully via Brevo. Status:', result.response?.statusCode);
+    console.log('📧 Message ID:', result.body?.messageId);
+    
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Error sending template email via Brevo:', error);
+    return false;
+  }
+}
+
+/**
+ * Send welcome email with temporary password using Brevo template
+ * @param userEmail - User email
+ * @param userName - User name
+ * @param tempPassword - Temporary password
+ */
+export async function sendWelcomeEmailWithPassword(userEmail: string, userName: string, tempPassword: string): Promise<boolean> {
+  console.log(`📧 Sending welcome email to ${userEmail} with template ID 2`);
+  
+  return sendEmailWithTemplate({
+    to: userEmail,
+    toName: userName,
+    templateId: 2,
+    params: {
+      PARAM_NAME: userName,
+      PARAM_EMAIL: userEmail,
+      PARAM_TEMP_PASSWORD: tempPassword
+    }
+  });
+}
+
+// ...existing code...
 export async function sendWelcomeEmail(userEmail: string, userName: string): Promise<boolean> {
   return sendEmail({
     to: userEmail,

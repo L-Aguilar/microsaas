@@ -10,7 +10,7 @@
     "strict": true,
     "noEmit": false,
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "..",
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,

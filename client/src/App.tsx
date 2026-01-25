@@ -18,6 +18,7 @@ import Opportunities from "@/pages/opportunities";
 import OpportunityDetail from "@/pages/opportunity-detail";
 import Reports from "@/pages/reports";
 import Users from "@/pages/users";
+import UserProfile from "@/pages/user-profile";
 import Modules from "@/pages/modules";
 import BusinessAccounts from "@/pages/business-accounts";
 import BusinessAccountDetail from "@/pages/business-account-detail";
@@ -164,6 +165,13 @@ function Router() {
         <ProtectedRoute>
           <Users />
         </ProtectedRoute>
+      </Route>
+      <Route path="/users/profile/:userId">
+        {(params) => (
+          <ProtectedRoute>
+            <UserProfile />
+          </ProtectedRoute>
+        )}
       </Route>
       <Route path="/business-accounts">
         <ProtectedRoute requiredRole="SUPER_ADMIN">

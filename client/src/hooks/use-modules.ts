@@ -44,7 +44,9 @@ export function useAnyCompanyHasModule(moduleType: string) {
 }
 
 // Hook to check if user's business account has a specific module enabled
+// @deprecated Use useModulePermissions from './use-module-permissions' instead
 export function useBusinessAccountHasModule(moduleType: string) {
+  console.warn('useBusinessAccountHasModule is deprecated. Use useModulePermissions instead.');
   const { user } = useAuth();
   
   // Create a specific endpoint for getting user's own business account modules

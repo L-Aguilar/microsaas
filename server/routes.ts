@@ -9,12 +9,19 @@ import { insertUserSchema, updateUserSchema, insertCompanySchema, updateCompanyS
 import { generateSecurePassword, generateAlphanumericPassword, hashPassword, verifyPassword } from "./utils/password";
 import bcrypt from "bcryptjs";
 import { sendWelcomeEmail } from "./utils/email";
-import { sendEmail, sendWelcomeEmail as sendBrevoWelcomeEmail } from "./services/emailService";
+import { sendEmail, sendWelcomeEmailWithPassword } from "./services/emailService";
 import { ReminderService } from "./services/reminderService";
 import { secureLog } from "./utils/secureLogger";
+import { validateRoleAssignment, validateUserModification, validateUserDeletion, isValidRole, UserRole } from "./utils/roleValidation";
+import { validatePasswordStrength, hashPasswordSecure, verifyPasswordSecure, checkPasswordHistory, addToPasswordHistory, generateSecurePassword } from "./utils/passwordValidation";
+import { updateUserAtomic, deleteUserAtomic, createUserAtomic, updateUserPermissionsAtomic } from "./utils/transactionValidation";
 import { generateToken } from "./utils/jwt.js";
 import { requireAuth, requireRole, requireSuperAdmin, requireBusinessAccount, authLimiter } from "./middleware/jwtAuth.js";
+import { requireAuthWithCSRF, validateJWTCSRFToken, provideCSRFNonce } from "./middleware/jwtCsrfProtection";
 import { checkPlanLimits, attachModulePermissions, updateUsageAfterAction } from "./middleware/planLimitsMiddleware";
+import { checkAccountStatus, requireActiveAccount, includeAccountStatus, requireActionPermission, checkUserLimits } from "./middleware/accountStatusMiddleware";
+// import { suspensionService } from "./services/suspensionService";
+// import { stripeService } from "./services/stripeService";
 import { planService } from "./services/planService";
 import { z } from "zod";
 
@@ -26,10 +33,10 @@ const loginSchema = z.object({
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database with essential data (Super Admin + modules)
   await storage.initializeData();
-  
+
   // Configure PostgreSQL session store
   const PgSession = ConnectPgSimple(session);
-  
+
   app.use(session({
     store: new PgSession({
       pool: pool,
@@ -51,10 +58,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     name: 'bizflow_session_id', // Change default session name for security
   }));
 
+  // JWT-CSRF protection is applied per endpoint as needed
+
   // Health check route for Railway
   app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
+    res.json({
+      status: "ok",
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
       jwtConfigured: !!process.env.JWT_SECRET,
@@ -68,7 +77,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const email = process.env.SUPER_ADMIN_EMAIL || "admin@yourcompany.com";
       const user = await storage.getUserByEmail(email);
-      res.json({ 
+      res.json({
         envEmail: process.env.SUPER_ADMIN_EMAIL || "not_set",
         envPasswordSet: !!process.env.SUPER_ADMIN_PASSWORD,
         userExists: !!user,
@@ -84,7 +93,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const testEmail = "admin@controly.com";
       const testPassword = "admin123";
-      
+
       // Check if already exists
       const existing = await storage.getUserByEmail(testEmail);
       if (existing) {
@@ -106,7 +115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const newUser = await storage.createUser(testAdmin);
-      res.json({ 
+      res.json({
         message: "Test admin created successfully",
         email: testEmail,
         password: testPassword,
@@ -127,19 +136,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE table_schema = 'public' 
         ORDER BY table_name;
       `);
-      
+
       // Check users table
       let usersCount = 0;
       let businessAccountsCount = 0;
       try {
         const usersResult = await pool.query('SELECT COUNT(*) FROM users');
         usersCount = parseInt(usersResult.rows[0].count);
-      } catch (e) {}
-      
+      } catch (e) { }
+
       try {
         const baResult = await pool.query('SELECT COUNT(*) FROM business_accounts');
         businessAccountsCount = parseInt(baResult.rows[0].count);
-      } catch (e) {}
+      } catch (e) { }
 
       res.json({
         tables: tablesResult.rows.map(r => r.table_name),
@@ -156,15 +165,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/test-db-connection", async (req, res) => {
     try {
       const result = await pool.query('SELECT NOW() as current_time');
-      res.json({ 
+      res.json({
         status: "connected",
         time: result.rows[0].current_time,
         message: "Database connection successful"
       });
     } catch (error) {
-      res.status(500).json({ 
+      res.status(500).json({
         status: "failed",
-        error: (error as Error).message 
+        error: (error as Error).message
       });
     }
   });
@@ -179,7 +188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
         ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false;
       `);
-      
+
       res.json({ message: "Users table migration completed successfully", status: "success" });
     } catch (error) {
       console.error("Migration error:", error);
@@ -307,15 +316,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Execute migration
       await pool.query(migrationSQL);
-      
-      res.json({ 
+
+      res.json({
         message: "Database tables created successfully",
         status: "success"
       });
     } catch (error) {
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Migration failed",
-        message: (error as Error).message 
+        message: (error as Error).message
       });
     }
   });
@@ -324,23 +333,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/debug-data", async (req, res) => {
     try {
       const results = {};
-      
+
       // Check users
       const usersResult = await pool.query('SELECT id, email, role FROM users LIMIT 5');
       results.users = usersResult.rows;
-      
+
       // Check business accounts
       const baResult = await pool.query('SELECT id, name FROM business_accounts LIMIT 5');
       results.businessAccounts = baResult.rows;
-      
+
       // Check modules
       const modulesResult = await pool.query('SELECT id, name, type FROM modules LIMIT 5');
       results.modules = modulesResult.rows;
-      
+
       // Check companies
       const companiesResult = await pool.query('SELECT id, name, business_account_id FROM companies LIMIT 5');
       results.companies = companiesResult.rows;
-      
+
       res.json(results);
     } catch (error) {
       res.status(500).json({ error: "Data debug failed", message: (error as Error).message });
@@ -352,13 +361,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { email, password } = loginSchema.parse(req.body);
       const user = await storage.getUserByEmail(email);
-      
+
       if (!user) {
         // Security audit log for failed login
-        secureLog.audit('USER_LOGIN_FAILED', undefined, { 
-          email, 
-          reason: 'USER_NOT_FOUND',
-          ip: req.ip 
+        secureLog({
+          level: 'warn',
+          action: 'USER_LOGIN_FAILED',
+          details: {
+            email,
+            reason: 'USER_NOT_FOUND',
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
         });
         return res.status(401).json({ message: "Invalid credentials" });
       }
@@ -372,13 +386,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Custom hash function
         isValidPassword = verifyPassword(password, user.password);
       }
-      
+
       if (!isValidPassword) {
         // Security audit log for failed login
-        secureLog.audit('USER_LOGIN_FAILED', user.id, { 
-          email: user.email, 
-          reason: 'INVALID_PASSWORD',
-          ip: req.ip 
+        secureLog({
+          level: 'warn',
+          action: 'USER_LOGIN_FAILED',
+          details: {
+            userId: user.id,
+            email: user.email,
+            reason: 'INVALID_PASSWORD',
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
         });
         return res.status(401).json({ message: "Invalid credentials" });
       }
@@ -388,43 +408,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`🔍 LOGIN: Checking business account ${user.businessAccountId} for user ${user.email}`);
         const businessAccount = await storage.getBusinessAccount(user.businessAccountId);
         console.log(`🔍 LOGIN: getBusinessAccount returned:`, businessAccount ? 'FOUND' : 'NOT FOUND');
-        
+
         if (!businessAccount) {
           console.log(`🚨 Login failed: Business account ${user.businessAccountId} not found (likely deleted)`);
-          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
-            email: user.email, 
-            reason: 'BUSINESS_ACCOUNT_DELETED',
-            businessAccountId: user.businessAccountId,
-            ip: req.ip 
+          secureLog({
+            level: 'warn',
+            action: 'USER_LOGIN_FAILED',
+            details: {
+              userId: user.id,
+              email: user.email,
+              reason: 'BUSINESS_ACCOUNT_DELETED',
+              businessAccountId: user.businessAccountId,
+              ipAddress: req.ip,
+              userAgent: req.get('User-Agent')
+            }
           });
-          return res.status(401).json({ 
-            message: "Esta organización ya no existe. Contacta al administrador si necesitas acceso" 
+          return res.status(401).json({
+            message: "Esta organización ya no existe. Contacta al administrador si necesitas acceso"
           });
         }
-        
+
         if (!businessAccount.isActive) {
           console.log(`🚨 Login failed: Business account ${user.businessAccountId} is inactive`);
-          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
-            email: user.email, 
-            reason: 'BUSINESS_ACCOUNT_INACTIVE',
-            businessAccountId: user.businessAccountId,
-            ip: req.ip 
+          secureLog({
+            level: 'warn',
+            action: 'USER_LOGIN_FAILED',
+            details: {
+              userId: user.id,
+              email: user.email,
+              reason: 'BUSINESS_ACCOUNT_INACTIVE',
+              businessAccountId: user.businessAccountId,
+              ipAddress: req.ip,
+              userAgent: req.get('User-Agent')
+            }
           });
-          return res.status(401).json({ 
-            message: "Esta organización está inactiva. Contacta al administrador" 
+          return res.status(401).json({
+            message: "Esta organización está inactiva. Contacta al administrador"
           });
         }
-        
+
         if (businessAccount.deletedAt) {
           console.log(`🚨 Login failed: Business account ${user.businessAccountId} is soft-deleted`);
-          secureLog.audit('USER_LOGIN_FAILED', user.id, { 
-            email: user.email, 
-            reason: 'BUSINESS_ACCOUNT_SOFT_DELETED',
-            businessAccountId: user.businessAccountId,
-            ip: req.ip 
+          secureLog({
+            level: 'warn',
+            action: 'USER_LOGIN_FAILED',
+            details: {
+              userId: user.id,
+              email: user.email,
+              reason: 'BUSINESS_ACCOUNT_SOFT_DELETED',
+              businessAccountId: user.businessAccountId,
+              ipAddress: req.ip,
+              userAgent: req.get('User-Agent')
+            }
           });
-          return res.status(401).json({ 
-            message: "Esta organización ha sido eliminada. Contacta al administrador si necesitas acceso" 
+          return res.status(401).json({
+            message: "Esta organización ha sido eliminada. Contacta al administrador si necesitas acceso"
           });
         }
       }
@@ -433,13 +471,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = generateToken(user);
 
       // Security audit log
-      secureLog.audit('USER_LOGIN_SUCCESS', user.id, { 
-        email: user.email, 
-        role: user.role,
-        ip: req.ip 
+      secureLog({
+        level: 'info',
+        action: 'USER_LOGIN_SUCCESS',
+        details: {
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
       });
 
-      res.json({ 
+      res.json({
         token,
         user: { ...user, password: undefined }
       });
@@ -472,12 +516,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/register", async (req, res) => {
     try {
       const { companyName, responsibleName, email, phone } = req.body;
-      
+
       // Validate required fields
       if (!companyName || !responsibleName || !email || !phone) {
-        return res.status(400).json({ 
-          message: "All fields are required", 
-          fields: { companyName, responsibleName, email, phone } 
+        return res.status(400).json({
+          message: "All fields are required",
+          fields: { companyName, responsibleName, email, phone }
         });
       }
 
@@ -492,25 +536,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (existingUser) {
         console.log(`📧 REGISTER: Found existing user with email ${email}`);
         console.log(`👤 REGISTER: User role: ${existingUser.role}, deleted: ${existingUser.isDeleted || existingUser.deletedAt ? 'YES' : 'NO'}`);
-        
+
         // If user is marked as deleted, hide that information for security
         if (existingUser.isDeleted || existingUser.deletedAt) {
           console.log(`🚨 REGISTER: User ${email} is deleted, returning generic error`);
           return res.status(401).json({ message: "Credenciales incorrectas" });
         }
-        
+
         // Check business account status if user has one
         if (existingUser.businessAccountId) {
           console.log(`🔍 REGISTER: Checking business account ${existingUser.businessAccountId}`);
           const businessAccount = await storage.getBusinessAccount(existingUser.businessAccountId);
-          
+
           if (!businessAccount || businessAccount.deletedAt) {
             console.log(`🏢 REGISTER: Business account is deleted/missing`);
-            
+
             // Only BUSINESS_ADMIN can reactivate their company
             if (existingUser.role === 'BUSINESS_ADMIN') {
               console.log(`✅ REGISTER: BUSINESS_ADMIN can reactivate account`);
-              return res.status(422).json({ 
+              return res.status(422).json({
                 message: "Tu empresa fue eliminada. ¿Deseas reactivar tu cuenta?",
                 canReactivate: true,
                 userId: existingUser.id,
@@ -518,27 +562,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             } else {
               console.log(`❌ REGISTER: USER role cannot reactivate, must contact admin`);
-              return res.status(403).json({ 
-                message: "Esta empresa ya no está activa. Contacta al administrador" 
+              return res.status(403).json({
+                message: "Esta empresa ya no está activa. Contacta al administrador"
               });
             }
           } else if (!businessAccount.isActive) {
             console.log(`🏢 REGISTER: Business account is inactive`);
-            return res.status(403).json({ 
-              message: "Esta empresa está inactiva. Contacta al administrador" 
+            return res.status(403).json({
+              message: "Esta empresa está inactiva. Contacta al administrador"
             });
           } else {
             // Business account is active, user should login instead
             console.log(`✅ REGISTER: User and business account are active`);
-            return res.status(409).json({ 
-              message: "Email ya registrado. Inicia sesión con tu cuenta existente" 
+            return res.status(409).json({
+              message: "Email ya registrado. Inicia sesión con tu cuenta existente"
             });
           }
         } else {
           // User exists but has no business account (shouldn't happen for non-SUPER_ADMIN)
           console.log(`⚠️ REGISTER: User exists but has no business account`);
-          return res.status(409).json({ 
-            message: "Email ya registrado. Inicia sesión con tu cuenta existente" 
+          return res.status(409).json({
+            message: "Email ya registrado. Inicia sesión con tu cuenta existente"
           });
         }
       }
@@ -553,7 +597,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create admin user for the business account
       const hashedPassword = await bcrypt.hash(tempPassword, 10);
-      
+
       await storage.createUser({
         name: responsibleName,
         email: email,
@@ -568,19 +612,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Send welcome email with Brevo template
       let emailSent = false;
-      
+
       // Try Brevo template first
       if (process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.includes('xxxxxxxx')) {
         try {
           const { sendBusinessWelcomeTemplate } = await import('./services/brevoTemplateService');
-          
+
           emailSent = await sendBusinessWelcomeTemplate({
             to: email,
             companyName: companyName,
             responsibleName: responsibleName,
             tempPassword: tempPassword
           });
-          
+
           if (emailSent) {
             console.log(`✅ Welcome email sent via Brevo template to ${email}`);
           }
@@ -593,7 +637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // If template fails, send basic email fallback
         console.log('📧 Falling back to basic email...');
         const { sendEmail } = await import('./services/emailService');
-        
+
         emailSent = await sendEmail({
           to: email,
           toName: responsibleName,
@@ -658,10 +702,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Error sending welcome email" });
       }
 
-      res.json({ 
+      res.json({
         message: "Registration successful! Check your email for login credentials.",
         email: email,
-        company: companyName 
+        company: companyName
       });
 
     } catch (error) {
@@ -717,9 +761,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ) VALUES ($1, $2, $3, $4, 'BUSINESS_ADMIN', $5, true, true, NOW(), NOW())
         RETURNING id
       `, [
-        pending.business_account_id, 
-        pending.responsible_name, 
-        pending.email, 
+        pending.business_account_id,
+        pending.responsible_name,
+        pending.email,
         hashedPassword,
         pending.phone
       ]);
@@ -823,7 +867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/recover-password", async (req, res) => {
     try {
       const { email } = req.body;
-      
+
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ message: "Email is required" });
       }
@@ -849,7 +893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update password in database
       const updateResult = await storage.updateUserPasswordById(user.id, hashedPassword);
-      
+
       if (!updateResult) {
         console.error(`❌ Failed to update password for user: ${user.id}`);
         return res.status(500).json({ message: "Failed to update password" });
@@ -965,7 +1009,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/reactivate-account", async (req, res) => {
     try {
       const { userId } = req.body;
-      
+
       if (!userId || typeof userId !== 'string') {
         return res.status(400).json({ message: "User ID is required" });
       }
@@ -995,11 +1039,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get business account (should exist but be soft-deleted)
       const businessAccount = await storage.getBusinessAccount(user.businessAccountId);
-      
+
       if (!businessAccount) {
         console.log(`❌ REACTIVATE: Business account ${user.businessAccountId} not found (hard-deleted)`);
-        return res.status(404).json({ 
-          message: "La empresa no puede ser reactivada. Contacta al administrador" 
+        return res.status(404).json({
+          message: "La empresa no puede ser reactivada. Contacta al administrador"
         });
       }
 
@@ -1017,7 +1061,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deletedAt: null,
         updatedAt: new Date()
       });
-      
+
       if (!updatedAccount) {
         console.log(`❌ REACTIVATE: Failed to reactivate business account ${user.businessAccountId}`);
         return res.status(500).json({ message: "Error al reactivar la empresa" });
@@ -1053,14 +1097,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // TEMPORARY: Fix business account plan field
-  app.post("/api/debug/fix-plan", async (req, res) => {
+  app.post("/api/debug/fix-plan", requireAuthWithCSRF, validateJWTCSRFToken, async (req, res) => {
     try {
       const { businessAccountId } = req.body;
-      
+
       if (!businessAccountId) {
         return res.status(400).json({ message: "businessAccountId required" });
       }
-      
+
       // Get the current plan from business_account_plans
       const planResult = await pool.query(`
         SELECT p.name, bap.plan_id 
@@ -1070,22 +1114,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY bap.created_at DESC
         LIMIT 1
       `, [businessAccountId]);
-      
+
       if (planResult.rows.length === 0) {
         return res.status(404).json({ message: "No active plan found for business account" });
       }
-      
+
       const planName = planResult.rows[0].name;
-      
+
       // Update business account plan field
       await pool.query(
         'UPDATE business_accounts SET plan = $1, updated_at = NOW() WHERE id = $2',
         [planName, businessAccountId]
       );
-      
+
       console.log(`🔧 Fixed business account plan: ${businessAccountId} -> ${planName}`);
-      
-      res.json({ 
+
+      res.json({
         message: "Business account plan field updated",
         businessAccountId,
         planName
@@ -1100,26 +1144,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/debug/permissions", async (req, res) => {
     try {
       const { businessAccountId, moduleType } = req.query as { businessAccountId: string; moduleType: string };
-      
+
       if (!businessAccountId || !moduleType) {
         return res.status(400).json({ message: "businessAccountId and moduleType required" });
       }
-      
+
       // Check business account
       const baResult = await pool.query('SELECT * FROM business_accounts WHERE id = $1', [businessAccountId]);
       console.log('🏢 Business Account:', baResult.rows[0]);
-      
+
       // Check plan
       const planResult = await pool.query('SELECT * FROM plans WHERE name = $1', [baResult.rows[0]?.plan]);
       console.log('📋 Plan:', planResult.rows[0]);
-      
+
       // Check plan modules
       const planModulesResult = await pool.query(
-        'SELECT * FROM plan_modules WHERE plan_id = $1 AND module_type = $2', 
+        'SELECT * FROM plan_modules WHERE plan_id = $1 AND module_type = $2',
         [planResult.rows[0]?.id, moduleType]
       );
       console.log('🔧 Plan Modules:', planModulesResult.rows);
-      
+
       // The problematic query
       const problemQuery = await pool.query(`
         SELECT pm.*, p.name as plan_name, ba.plan as ba_plan
@@ -1128,9 +1172,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         JOIN plan_modules pm ON p.id = pm.plan_id
         WHERE ba.id = $1 AND pm.module_type = $2 AND pm.is_included = true
       `, [businessAccountId, moduleType]);
-      
+
       console.log('🔍 Problem Query Result:', problemQuery.rows);
-      
+
       res.json({
         businessAccount: baResult.rows[0],
         plan: planResult.rows[0],
@@ -1144,24 +1188,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // TEMPORARY: Debug endpoint to delete user
-  app.delete("/api/debug/delete-user", async (req, res) => {
+  app.delete("/api/debug/delete-user", requireAuthWithCSRF, validateJWTCSRFToken, async (req, res) => {
     try {
       const email = req.query.email as string;
       if (!email) {
         return res.status(400).json({ message: "Email required" });
       }
-      
+
       const result = await pool.query(
-        'DELETE FROM users WHERE email = $1 RETURNING id, email, name', 
+        'DELETE FROM users WHERE email = $1 RETURNING id, email, name',
         [email]
       );
-      
+
       if (result.rows.length > 0) {
         const deletedUser = result.rows[0];
         console.log(`🗑️ Usuario eliminado: ${deletedUser.email}`);
-        res.json({ 
-          message: "Usuario eliminado", 
-          user: deletedUser 
+        res.json({
+          message: "Usuario eliminado",
+          user: deletedUser
         });
       } else {
         res.status(404).json({ message: "Usuario no encontrado" });
@@ -1174,7 +1218,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
   // Using imported JWT middleware instead of local session middleware
-  
+
   // Helper function for multiple role support (temporary)
   const requireAnyRole = (roles: string[]) => {
     return (req: any, res: any, next: any) => {
@@ -1182,8 +1226,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Authentication required" });
       }
       if (!roles.includes(req.user.role)) {
+        console.log(`❌ requireAnyRole FAILED: User role ${req.user.role} not in [${roles}]`);
         return res.status(403).json({ message: "Insufficient permissions" });
       }
+      console.log(`✅ requireAnyRole PASSED for ${req.user.email}`);
       next();
     };
   };
@@ -1191,19 +1237,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware for business account data isolation (assumes JWT auth already verified)
   const requireBusinessAccountWithId = (req: any, res: any, next: any) => {
     const user = req.user;
-    
+
     // SUPER_ADMIN can access all business accounts
     if (user.role === 'SUPER_ADMIN') {
       return next();
     }
-    
+
     // Other roles must have a business account
     if (!user.businessAccountId) {
+      console.log('❌ requireBusinessAccountWithId FAILED: No businessAccountId on user');
       return res.status(403).json({ message: "No business account access" });
     }
-    
+
     // Add businessAccountId to request for filtering
     req.businessAccountId = user.businessAccountId;
+    console.log(`✅ requireBusinessAccountWithId PASSED for ${user.email} (BA: ${user.businessAccountId})`);
     next();
   };
 
@@ -1215,25 +1263,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(401).json({ message: "Authentication required" });
       }
-      
+
       // SUPER_ADMIN bypasses module checks
       if (user.role === 'SUPER_ADMIN') {
         return next();
       }
-      
+
       if (!user.businessAccountId) {
         return res.status(400).json({ message: "Business account required" });
       }
-      
+
       // UPDATED: Use unified permission system instead of storage.hasModuleEnabled
       try {
         const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
         const hasAccess = await unifiedPermissionService.hasModuleAccess(user.businessAccountId, moduleType);
-        
+
         if (!hasAccess) {
+          console.log(`❌ requireModule FAILED: ${moduleType} access denied for BA ${user.businessAccountId}`);
           return res.status(403).json({ message: `Module ${moduleType} not enabled for your organization` });
         }
-        
+
+        console.log(`✅ requireModule PASSED: ${moduleType}`);
         next();
       } catch (error) {
         console.error('requireModule error:', error);
@@ -1260,7 +1310,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: module.type,
         isEnabled: module.isEnabled
       }));
-      
+
       res.json(moduleStatus);
     } catch (error) {
       console.error("Error fetching user business account modules:", error);
@@ -1272,29 +1322,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/debug/permissions/:moduleType", requireAuth, async (req: any, res) => {
     const moduleType = req.params.moduleType;
     const user = req.user;
-    
+
     try {
       if (user.role === 'SUPER_ADMIN') {
         return res.json({ hasAccess: true, reason: 'SUPER_ADMIN bypass' });
       }
-      
+
       if (!user.businessAccountId) {
         return res.json({ hasAccess: false, reason: 'No business account ID' });
       }
-      
+
       console.log(`🔍 Debug: Checking ${moduleType} access for business account ${user.businessAccountId}`);
-      
+
       const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
       const fullResult = await unifiedPermissionService.getModuleAccess(user.businessAccountId, moduleType);
       const hasAccess = await unifiedPermissionService.hasModuleAccess(user.businessAccountId, moduleType);
-      
+
       console.log(`📊 Debug result:`, {
         businessAccountId: user.businessAccountId,
         moduleType,
         hasAccess,
         fullResult
       });
-      
+
       res.json({
         businessAccountId: user.businessAccountId,
         moduleType,
@@ -1315,17 +1365,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simple table structure check
   app.get("/api/debug/table-structure/:tableName", requireAuth, async (req: any, res) => {
     const tableName = req.params.tableName;
-    
+
     try {
       console.log(`🔍 Checking structure of table: ${tableName}`);
-      
+
       const result = await pool.query(`
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
         WHERE table_name = $1
         ORDER BY ordinal_position
       `, [tableName]);
-      
+
       res.json({
         tableName,
         columns: result.rows
@@ -1339,30 +1389,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Check business account plan and modules
   app.get("/api/debug/business-account/:businessAccountId/plan", requireAuth, async (req: any, res) => {
     const businessAccountId = req.params.businessAccountId;
-    
+
     try {
       console.log(`🔍 Checking plan for business account: ${businessAccountId}`);
-      
+
       // Get business account info
       const businessAccountQuery = await pool.query(`
         SELECT * FROM business_accounts WHERE id = $1
       `, [businessAccountId]);
-      
+
       if (businessAccountQuery.rows.length === 0) {
         return res.status(404).json({ error: 'Business account not found' });
       }
-      
+
       const businessAccount = businessAccountQuery.rows[0];
       console.log(`📊 Business account:`, businessAccount);
-      
+
       // Get plan info
       const planQuery = await pool.query(`
         SELECT * FROM plans WHERE name = $1
       `, [businessAccount.plan]);
-      
+
       const plan = planQuery.rows[0] || null;
       console.log(`📋 Plan:`, plan);
-      
+
       // Get plan modules
       let planModules = [];
       if (plan) {
@@ -1371,9 +1421,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `, [plan.id]);
         planModules = modulesQuery.rows;
       }
-      
+
       console.log(`📦 Plan modules: ${planModules.length} modules`);
-      
+
       res.json({
         businessAccount: {
           id: businessAccount.id,
@@ -1388,7 +1438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           features: module.features
         }))
       });
-      
+
     } catch (error) {
       console.error('Business account plan check error:', error);
       res.status(500).json({ error: error.message });
@@ -1399,7 +1449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/debug/all-plans", requireAuth, async (req: any, res) => {
     try {
       console.log(`🔍 Fetching all plans and their modules`);
-      
+
       const plansQuery = await pool.query(`
         SELECT p.*, 
                array_agg(
@@ -1414,7 +1464,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         GROUP BY p.id, p.name, p.price, p.description
         ORDER BY p.name
       `);
-      
+
       res.json({
         plans: plansQuery.rows.map(plan => ({
           id: plan.id,
@@ -1425,7 +1475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           modules: plan.modules.filter(m => m.module_type) // Remove null entries
         }))
       });
-      
+
     } catch (error) {
       console.error('All plans fetch error:', error);
       res.status(500).json({ error: error.message });
@@ -1433,23 +1483,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Fix business account plan assignment
-  app.post("/api/debug/fix-business-account-plan", requireAuth, async (req: any, res) => {
+  app.post("/api/debug/fix-business-account-plan", requireAuthWithCSRF, validateJWTCSRFToken, async (req: any, res) => {
     const { businessAccountId, newPlanName } = req.body;
     const user = req.user;
-    
+
     try {
       console.log(`🔧 Fixing plan for business account: ${businessAccountId} → ${newPlanName}`);
       console.log(`👤 Requested by: ${user.email} (${user.role})`);
-      
+
       // Verify the new plan exists
       const planCheck = await pool.query(`
         SELECT id, name FROM plans WHERE name = $1 AND is_active = true
       `, [newPlanName]);
-      
+
       if (planCheck.rows.length === 0) {
         return res.status(400).json({ error: `Plan "${newPlanName}" not found or inactive` });
       }
-      
+
       // Update business account plan
       const updateResult = await pool.query(`
         UPDATE business_accounts 
@@ -1457,13 +1507,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE id = $2
         RETURNING *
       `, [newPlanName, businessAccountId]);
-      
+
       if (updateResult.rows.length === 0) {
         return res.status(404).json({ error: 'Business account not found' });
       }
-      
+
       console.log(`✅ Plan updated successfully`);
-      
+
       res.json({
         success: true,
         businessAccountId,
@@ -1472,7 +1522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedBy: user.email,
         timestamp: new Date().toISOString()
       });
-      
+
     } catch (error) {
       console.error('Fix business account plan error:', error);
       res.status(500).json({ error: error.message });
@@ -1480,24 +1530,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Add module to plan
-  app.post("/api/debug/add-module-to-plan", requireAuth, async (req: any, res) => {
+  app.post("/api/debug/add-module-to-plan", requireAuthWithCSRF, validateJWTCSRFToken, async (req: any, res) => {
     const { planName, moduleType, itemLimit = null } = req.body;
     const user = req.user;
-    
+
     try {
       console.log(`🔧 Adding ${moduleType} module to plan: ${planName} (limit: ${itemLimit || 'unlimited'})`);
-      
+
       // Get plan ID
       const planQuery = await pool.query(`
         SELECT id FROM plans WHERE name = $1
       `, [planName]);
-      
+
       if (planQuery.rows.length === 0) {
         return res.status(404).json({ error: `Plan "${planName}" not found` });
       }
-      
+
       const planId = planQuery.rows[0].id;
-      
+
       // Add module to plan (or update if exists)
       const insertResult = await pool.query(`
         INSERT INTO plan_modules (id, plan_id, module_type, is_included, item_limit)
@@ -1508,9 +1558,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           item_limit = EXCLUDED.item_limit
         RETURNING *
       `, [planId, moduleType, itemLimit]);
-      
+
       console.log(`✅ Module added/updated successfully`);
-      
+
       res.json({
         success: true,
         planName,
@@ -1520,7 +1570,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: new Date().toISOString(),
         module: insertResult.rows[0]
       });
-      
+
     } catch (error) {
       console.error('Add module to plan error:', error);
       res.status(500).json({ error: error.message });
@@ -1528,30 +1578,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Execute corrective migration endpoint
-  app.post("/api/debug/run-migration/:migrationFile", requireAuth, async (req: any, res) => {
+  app.post("/api/debug/run-migration/:migrationFile", requireAuthWithCSRF, validateJWTCSRFToken, async (req: any, res) => {
     const migrationFile = req.params.migrationFile;
     const user = req.user;
-    
+
     try {
       console.log(`🔧 Running migration: ${migrationFile}`);
       console.log(`👤 Requested by: ${user.email} (${user.role})`);
-      
+
       // Read migration file
       const fs = await import('fs/promises');
       const path = await import('path');
-      
+
       const migrationPath = path.join(process.cwd(), 'server', 'migrations', `${migrationFile}.sql`);
       const migrationSQL = await fs.readFile(migrationPath, 'utf8');
-      
+
       console.log(`📄 Migration size: ${migrationSQL.length} characters`);
-      
+
       // Execute migration
       const startTime = Date.now();
       const result = await pool.query(migrationSQL);
       const duration = Date.now() - startTime;
-      
+
       console.log(`✅ Migration completed in ${duration}ms`);
-      
+
       res.json({
         success: true,
         migrationFile,
@@ -1561,10 +1611,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('Migration execution error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: error.message,
         migrationFile,
-        executedBy: user.email 
+        executedBy: user.email
       });
     }
   });
@@ -1572,10 +1622,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // System-wide audit endpoint for debugging permissions
   app.get("/api/debug/system-audit", requireAuth, async (req: any, res) => {
     const user = req.user;
-    
+
     try {
       console.log('🔍 Starting system-wide permissions audit...');
-      
+
       const auditResults: any = {
         timestamp: new Date().toISOString(),
         requestedBy: user.email,
@@ -1602,7 +1652,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         GROUP BY p.id, p.name, p.price, p.description
         ORDER BY p.name
       `);
-      
+
       auditResults.plans = plansQuery.rows.map(plan => ({
         id: plan.id,
         name: plan.name,
@@ -1618,9 +1668,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LEFT JOIN plans p ON ba.plan_id = p.id
         ORDER BY ba.name
       `);
-      
+
       const { unifiedPermissionService } = await import('./services/unifiedPermissionService');
-      
+
       for (const account of businessAccountsQuery.rows) {
         const accountAudit: any = {
           id: account.id,
@@ -1630,14 +1680,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userCount: account.user_count,
           modulePermissions: {}
         };
-        
+
         if (!account.plan_id) {
           auditResults.issues.push(`${account.name}: No plan assigned`);
         }
-        
+
         // Test unified permissions for standard modules
         const testModules = ['USERS', 'CRM', 'COMPANIES'];
-        
+
         for (const moduleType of testModules) {
           try {
             const permResult = await unifiedPermissionService.getModuleAccess(account.id, moduleType);
@@ -1646,7 +1696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               source: permResult.source,
               permissions: permResult.permissions
             };
-            
+
             if (!permResult.hasAccess && account.plan_id) {
               auditResults.issues.push(`${account.name}: ${moduleType} denied despite having plan ${account.plan_name}`);
             }
@@ -1657,7 +1707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             auditResults.issues.push(`${account.name}: ${moduleType} error - ${error.message}`);
           }
         }
-        
+
         auditResults.businessAccounts.push(accountAudit);
       }
 
@@ -1666,7 +1716,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT proname FROM pg_proc 
         WHERE proname = 'get_effective_permissions'
       `);
-      
+
       if (functionCheck.rows.length === 0) {
         auditResults.issues.push('CRITICAL: get_effective_permissions function missing');
       }
@@ -1675,13 +1725,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT viewname FROM pg_views 
         WHERE viewname = 'v_unified_permissions'
       `);
-      
+
       if (viewCheck.rows.length === 0) {
         auditResults.issues.push('CRITICAL: v_unified_permissions view missing');
       }
 
       console.log(`🔍 Audit complete: ${auditResults.plans.length} plans, ${auditResults.businessAccounts.length} accounts, ${auditResults.issues.length} issues`);
-      
+
       res.json(auditResults);
     } catch (error) {
       console.error('System audit error:', error);
@@ -1700,14 +1750,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.post("/api/business-accounts", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { enabledModules, ...accountData } = req.body;
       const parsedAccountData = insertBusinessAccountSchema.parse(accountData);
-      
+
       // Create the business account
       const account = await storage.createBusinessAccount(parsedAccountData);
-      
+
       // Enable selected modules
       if (enabledModules && Array.isArray(enabledModules)) {
         const userId = (req as any).user?.id; // Get the super admin ID for tracking
@@ -1715,7 +1765,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.enableModuleForBusinessAccount(account.id, moduleId, userId || 'system');
         }
       }
-      
+
       res.json(account);
     } catch (error) {
       console.error("Error creating business account:", error);
@@ -1736,12 +1786,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/business-accounts/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       // Extract contact fields separately before parsing (these are user fields, not business account fields)
       const { contactEmail, contactName, contactPhone, ...businessAccountFields } = req.body;
       const accountData = insertBusinessAccountSchema.partial().parse(businessAccountFields);
-      
+
       // Add contact fields back if they exist (will be handled in updateBusinessAccount)
       if (contactEmail !== undefined) {
         (accountData as any).contactEmail = contactEmail;
@@ -1752,7 +1802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (contactPhone !== undefined) {
         (accountData as any).contactPhone = contactPhone;
       }
-      
+
       const account = await storage.updateBusinessAccount(req.params.id, accountData);
       if (!account) {
         return res.status(404).json({ message: "Business account not found" });
@@ -1764,7 +1814,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/business-accounts/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.delete("/api/business-accounts/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const deleted = await storage.deleteBusinessAccount(req.params.id);
       if (deleted) {
@@ -1819,19 +1869,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create user for a specific business account (SUPER_ADMIN)
-  app.post("/api/business-accounts/:id/users", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.post("/api/business-accounts/:id/users", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
-      
+
       // Generate secure password if not provided or empty
       if (!userData.password || userData.password.trim() === '') {
         const { generateSecurePassword } = await import('./utils/password');
         userData.password = generateSecurePassword(12);
       }
-      
+
       // Assign to the specified business account
       userData = { ...userData, businessAccountId: req.params.id };
-      
+
       const user = await storage.createUser(userData);
       res.json({ ...user, password: undefined });
     } catch (error) {
@@ -1841,7 +1891,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Users routes (only for BUSINESS_ADMIN within their organization)
-  app.get("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
+  app.get("/api/users", requireAuth, requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       const users = await storage.getUsers(req.businessAccountId);
       const safeUsers = users.map(user => ({
@@ -1855,76 +1905,391 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'create'), async (req: any, res) => {
+  app.post("/api/users", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('USERS'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       let userData = insertUserSchema.parse(req.body);
-      
-      // Generate secure password if not provided or empty
+
+      // Validate role assignment
+      if (!isValidRole(userData.role)) {
+        return res.status(400).json({ message: "Rol inválido" });
+      }
+
+      const canAssignRole = validateRoleAssignment(
+        req.user.role as UserRole,
+        userData.role as UserRole,
+        {
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
+      );
+
+      if (!canAssignRole) {
+        secureLog({
+          level: 'warn',
+          action: 'UNAUTHORIZED_ROLE_ASSIGNMENT_ATTEMPT',
+          details: {
+            userId: req.user.id,
+            attemptedRole: userData.role,
+            userRole: req.user.role,
+            businessAccountId: req.businessAccountId,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
+        });
+        return res.status(403).json({ message: "No tienes permisos para asignar este rol" });
+      }
+
+      // Generate secure password if not provided
+      let temporaryPassword = '';
       if (!userData.password || userData.password.trim() === '') {
-        const { generateSecurePassword } = await import('./utils/password');
-        userData.password = generateSecurePassword(12);
-      }
-      
-      // Automatically assign to the BUSINESS_ADMIN user's business account
-      userData = { ...userData, businessAccountId: req.businessAccountId };
-      
-      const user = await storage.createUser(userData);
-      res.json({ ...user, password: undefined });
-    } catch (error) {
-      console.error("Error creating user:", error);
-      res.status(400).json({ message: "Invalid user data" });
-    }
-  });
-
-  app.put("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
-    try {
-      // First check if user exists and user has access
-      const existingUser = await storage.getUser(req.params.id);
-      if (!existingUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      // Security check: non-SUPER_ADMIN can only update users from their business account
-      if (req.user.role !== 'SUPER_ADMIN' && existingUser.businessAccountId !== req.user.businessAccountId) {
-        return res.status(403).json({ message: "Cannot update user from different organization" });
-      }
-      
-      const userData = updateUserSchema.parse(req.body);
-      const user = await storage.updateUser(req.params.id, userData);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      // Remove password from response
-      res.json({ ...user, password: undefined });
-    } catch (error) {
-      console.error("Error updating user:", error);
-      res.status(500).json({ message: "Failed to update user" });
-    }
-  });
-
-  app.delete("/api/users/:id", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), async (req: any, res) => {
-    try {
-      const user = await storage.getUser(req.params.id);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      // Security check: non-SUPER_ADMIN can only delete users from their business account
-      if (req.user.role !== 'SUPER_ADMIN' && user.businessAccountId !== req.user.businessAccountId) {
-        return res.status(403).json({ message: "Cannot delete user from different organization" });
-      }
-      
-      const deleted = await storage.deleteUser(req.params.id);
-      if (deleted) {
-        res.json({ message: "User deleted successfully" });
+        temporaryPassword = generateSecurePassword(16);
+        userData.password = temporaryPassword;
       } else {
-        res.status(404).json({ message: "User not found" });
+        // Validate password strength
+        const passwordValidation = validatePasswordStrength(userData.password);
+        if (!passwordValidation.isValid) {
+          return res.status(400).json({
+            message: "La contraseña no cumple con los requisitos de seguridad",
+            errors: passwordValidation.errors
+          });
+        }
+        temporaryPassword = userData.password;
+      }
+
+      // Hash password securely
+      const hashedPassword = hashPasswordSecure(userData.password);
+      userData.password = hashedPassword;
+
+      // Assign to correct business account
+      userData.businessAccountId = userData.businessAccountId || req.businessAccountId;
+
+      // Use storage.createUser directly with proper validation
+      const user = await storage.createUser(userData);
+
+      // Send welcome email with temporary password
+      try {
+        console.log(`📧 Attempting to send welcome email to ${user.email}`);
+        const emailSent = await sendWelcomeEmailWithPassword(user.email, user.name, temporaryPassword);
+        if (emailSent) {
+          console.log(`✅ Welcome email sent successfully to ${user.email}`);
+        } else {
+          console.warn(`⚠️ Failed to send welcome email to ${user.email}`);
+        }
+      } catch (emailError) {
+        console.error(`❌ Error sending welcome email to ${user.email}:`, emailError);
+        // Don't fail the user creation if email fails
+      }
+
+      secureLog({
+        level: 'info',
+        action: 'USER_CREATED',
+        details: {
+          newUserId: user.id,
+          newUserEmail: user.email,
+          newUserRole: user.role,
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
+      });
+
+      res.json({ ...user, password: undefined });
+    } catch (error) {
+      secureLog({
+        level: 'error',
+        action: 'USER_CREATION_ERROR',
+        details: {
+          error: error.message,
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip
+        }
+      });
+      res.status(400).json({ message: "Error al crear usuario" });
+    }
+  });
+
+  app.put("/api/users/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('USERS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      const userData = updateUserSchema.parse(req.body);
+
+      // Validate role change if role is being updated
+      if (userData.role) {
+        if (!isValidRole(userData.role)) {
+          return res.status(400).json({ message: "Rol inválido" });
+        }
+      }
+
+      // Whitelist fields that can be updated
+      const UPDATABLE_FIELDS = ['name', 'email', 'phone', 'avatar', 'role'];
+      const filteredData: any = {};
+      
+      UPDATABLE_FIELDS.forEach(field => {
+        if (field in userData && userData[field] !== undefined) {
+          filteredData[field] = userData[field];
+        }
+      });
+
+      if (Object.keys(filteredData).length === 0) {
+        return res.status(400).json({ message: "No hay campos para actualizar" });
+      }
+
+      secureLog({
+        level: 'debug',
+        action: 'USER_UPDATE_REQUEST',
+        details: {
+          targetUserId: req.params.id,
+          performedBy: req.user.id,
+          fieldsToUpdate: Object.keys(filteredData),
+          businessAccountId: req.businessAccountId
+        }
+      });
+
+      // Update user atomically with permission-based validation
+      const user = await updateUserAtomic(
+        req.params.id,
+        filteredData,
+        async (existingUser) => {
+          // Use unified permission system instead of obsolete role hierarchy
+          const permissions = await planService.getModulePermissions(req.businessAccountId, 'USERS', req.user.id);
+
+          // DEBUG: Log permissions to understand the discrepancy
+          console.log('🔍 DEBUG PUT endpoint permissions:', {
+            businessAccountId: req.businessAccountId,
+            userId: req.user.id,
+            permissions: permissions
+          });
+
+          // Check if user has edit permissions
+          if (!permissions.canEdit) {
+            secureLog({
+              level: 'warn',
+              action: 'UNAUTHORIZED_USER_MODIFICATION_ATTEMPT',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                targetUserRole: existingUser.role,
+                userRole: req.user.role,
+                businessAccountId: req.businessAccountId,
+                targetBusinessAccountId: existingUser.business_account_id,
+                reason: 'NO_EDIT_PERMISSION',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            });
+            return false;
+          }
+
+          // Security restriction: users cannot edit BUSINESS_ADMIN (except SUPER_ADMIN)
+          if (existingUser.role === 'BUSINESS_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
+            secureLog({
+              level: 'warn',
+              action: 'UNAUTHORIZED_USER_MODIFICATION_ATTEMPT',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                targetUserRole: existingUser.role,
+                userRole: req.user.role,
+                businessAccountId: req.businessAccountId,
+                reason: 'CANNOT_EDIT_BUSINESS_ADMIN',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            });
+            return false;
+          }
+
+          // Business account isolation: only SUPER_ADMIN can edit across accounts
+          if (req.user.role !== 'SUPER_ADMIN' && existingUser.business_account_id !== req.businessAccountId) {
+            secureLog({
+              level: 'warn',
+              action: 'UNAUTHORIZED_USER_MODIFICATION_ATTEMPT',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                businessAccountId: req.businessAccountId,
+                targetBusinessAccountId: existingUser.business_account_id,
+                reason: 'CROSS_ACCOUNT_ACCESS_DENIED',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            });
+            return false;
+          }
+
+          // If role is being changed, validate the new role assignment
+          if (userData.role && userData.role !== existingUser.role) {
+            const canAssignNewRole = validateRoleAssignment(
+              req.user.role as UserRole,
+              userData.role as UserRole,
+              {
+                performedBy: req.user.id,
+                businessAccountId: req.businessAccountId,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            );
+
+            if (!canAssignNewRole) {
+              secureLog({
+                level: 'warn',
+                action: 'UNAUTHORIZED_ROLE_CHANGE_ATTEMPT',
+                details: {
+                  userId: req.user.id,
+                  targetUserId: existingUser.id,
+                  oldRole: existingUser.role,
+                  newRole: userData.role,
+                  userRole: req.user.role,
+                  businessAccountId: req.businessAccountId,
+                  ipAddress: req.ip
+                }
+              });
+              return false;
+            }
+          }
+
+          return true;
+        },
+        {
+          userId: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          action: 'UPDATE_USER'
+        }
+      );
+
+      secureLog({
+        level: 'info',
+        action: 'USER_UPDATED',
+        details: {
+          targetUserId: user.id,
+          updatedFields: Object.keys(filteredData),
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
+      });
+
+      res.json({ ...user, password: undefined });
+    } catch (error: any) {
+      secureLog({
+        level: 'error',
+        action: 'USER_UPDATE_ERROR',
+        details: {
+          error: error?.message || 'Unknown error',
+          errorStack: error?.stack,
+          targetUserId: req.params.id,
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip
+        }
+      });
+
+      if (error.message?.includes('Validación falló')) {
+        return res.status(403).json({ message: "No tienes permisos para realizar esta acción" });
+      } else if (error.message?.includes('Usuario no encontrado')) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      } else if (error.message?.includes('syntax') || error.message?.includes('SQL')) {
+        return res.status(400).json({ message: "Error en los datos enviados" });
+      } else {
+        return res.status(500).json({ message: "Error al actualizar usuario" });
+      }
+    }
+  });
+
+  app.delete("/api/users/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('USERS'), checkPlanLimits('USERS', 'delete'), updateUsageAfterAction('USERS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      // Delete user atomically with comprehensive validation
+      const deleted = await deleteUserAtomic(
+        req.params.id,
+        async (existingUser) => {
+          // Validate user deletion permissions
+          const canDelete = validateUserDeletion(
+            req.user.role as UserRole,
+            req.user.id,
+            req.params.id,
+            existingUser.role as UserRole,
+            {
+              performedBy: req.user.id,
+              businessAccountId: req.businessAccountId,
+              ipAddress: req.ip,
+              userAgent: req.get('User-Agent')
+            }
+          );
+
+          if (!canDelete) {
+            secureLog({
+              level: 'warn',
+              action: 'UNAUTHORIZED_USER_DELETION_ATTEMPT',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                targetUserRole: existingUser.role,
+                userRole: req.user.role,
+                businessAccountId: req.businessAccountId,
+                targetBusinessAccountId: existingUser.businessAccountId,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            });
+            return false;
+          }
+
+          // Additional business logic validation
+          if (req.user.role !== 'SUPER_ADMIN' && existingUser.businessAccountId !== req.user.businessAccountId) {
+            secureLog({
+              level: 'warn',
+              action: 'CROSS_ACCOUNT_DELETION_BLOCKED',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                userBusinessAccountId: req.user.businessAccountId,
+                targetBusinessAccountId: existingUser.businessAccountId,
+                ipAddress: req.ip
+              }
+            });
+            return false;
+          }
+
+          return true;
+        },
+        {
+          userId: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          action: 'DELETE_USER'
+        }
+      );
+
+      if (deleted) {
+        res.json({ message: "Usuario eliminado exitosamente" });
+      } else {
+        res.status(404).json({ message: "Usuario no encontrado" });
       }
     } catch (error) {
-      console.error("Error deleting user:", error);
-      res.status(500).json({ message: "Failed to delete user" });
+      secureLog({
+        level: 'error',
+        action: 'USER_DELETION_ERROR',
+        details: {
+          error: error.message,
+          targetUserId: req.params.id,
+          performedBy: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip
+        }
+      });
+
+      if (error.message.includes('Validación falló')) {
+        res.status(403).json({ message: "No tienes permisos para eliminar este usuario" });
+      } else {
+        res.status(500).json({ message: "Error al eliminar usuario" });
+      }
     }
   });
 
@@ -1946,119 +2311,250 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Change user password endpoint
-  app.put("/api/users/:id/password", requireAuth, async (req: any, res) => {
+  // Change user password endpoint with enhanced security
+  app.put("/api/users/:id/password", requireAuthWithCSRF, validateJWTCSRFToken, async (req: any, res) => {
     try {
       // Users can only change their own password
       if (req.user.id !== req.params.id) {
-        return res.status(403).json({ message: "You can only change your own password" });
+        secureLog({
+          level: 'warn',
+          action: 'UNAUTHORIZED_PASSWORD_CHANGE_ATTEMPT',
+          details: {
+            userId: req.user.id,
+            targetUserId: req.params.id,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
+        });
+        return res.status(403).json({ message: "Solo puedes cambiar tu propia contraseña" });
       }
 
       const { currentPassword, newPassword } = req.body;
 
       if (!currentPassword || !newPassword) {
-        return res.status(400).json({ message: "Current password and new password are required" });
+        return res.status(400).json({ message: "Contraseña actual y nueva contraseña son requeridas" });
       }
 
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "New password must be at least 6 characters long" });
+      // Validate new password strength
+      const passwordValidation = validatePasswordStrength(newPassword);
+      if (!passwordValidation.isValid) {
+        return res.status(400).json({
+          message: "La nueva contraseña no cumple con los requisitos de seguridad",
+          errors: passwordValidation.errors,
+          score: passwordValidation.score
+        });
       }
 
-      // Get current user data
+      // Get current user data with lock
       const existingUser = await storage.getUser(req.params.id);
       if (!existingUser) {
-        return res.status(404).json({ message: "User not found" });
+        return res.status(404).json({ message: "Usuario no encontrado" });
       }
 
-      // Verify current password
-      const isValidPassword = await bcrypt.compare(currentPassword, existingUser.password);
+      // Verify current password with timing-safe comparison
+      const isValidPassword = await verifyPasswordSecure(currentPassword, existingUser.password);
       if (!isValidPassword) {
-        return res.status(401).json({ message: "Current password is incorrect" });
+        secureLog({
+          level: 'warn',
+          action: 'INCORRECT_CURRENT_PASSWORD',
+          details: {
+            userId: req.user.id,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
+        });
+        return res.status(401).json({ message: "La contraseña actual es incorrecta" });
       }
 
-      // Hash new password
-      const saltRounds = 10;
-      const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+      // Check password history to prevent reuse
+      const historyCheck = checkPasswordHistory(req.params.id, newPassword, 5);
+      if (!historyCheck.canUse) {
+        return res.status(400).json({
+          message: historyCheck.message || "No puedes reutilizar contraseñas recientes"
+        });
+      }
 
-      // Update password in database
-      const updatedUser = await storage.updateUser(req.params.id, {
-        password: hashedNewPassword
+      // Hash new password with secure method
+      const hashedNewPassword = hashPasswordSecure(newPassword);
+
+      // Update password atomically
+      const updatedUser = await updateUserAtomic(
+        req.params.id,
+        { password: hashedNewPassword },
+        async (user) => {
+          // Additional validation if needed
+          return user.id === req.user.id;
+        },
+        {
+          userId: req.user.id,
+          businessAccountId: req.user.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          action: 'CHANGE_PASSWORD'
+        }
+      );
+
+      // Add password to history
+      addToPasswordHistory(req.params.id, hashedNewPassword, 5);
+
+      secureLog({
+        level: 'info',
+        action: 'PASSWORD_CHANGED',
+        details: {
+          userId: req.user.id,
+          passwordScore: passwordValidation.score,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
       });
 
-      if (!updatedUser) {
-        return res.status(500).json({ message: "Failed to update password" });
-      }
-
-      res.json({ message: "Password updated successfully" });
+      res.json({
+        message: "Contraseña actualizada exitosamente",
+        passwordScore: passwordValidation.score
+      });
     } catch (error) {
-      console.error("Error changing password:", error);
-      res.status(500).json({ message: "Failed to change password" });
+      secureLog({
+        level: 'error',
+        action: 'PASSWORD_CHANGE_ERROR',
+        details: {
+          error: error.message,
+          userId: req.user.id,
+          ipAddress: req.ip
+        }
+      });
+      res.status(500).json({ message: "Error al cambiar contraseña" });
     }
   });
 
-  // Update own profile endpoint (for account settings)
-  app.put("/api/users/:id/profile", requireAuth, async (req: any, res) => {
+  // Update own profile endpoint with enhanced security
+  app.put("/api/users/:id/profile", requireAuthWithCSRF, validateJWTCSRFToken, async (req: any, res) => {
     try {
       // Users can only update their own profile
       if (req.user.id !== req.params.id) {
-        return res.status(403).json({ message: "You can only update your own profile" });
+        secureLog({
+          level: 'warn',
+          action: 'UNAUTHORIZED_PROFILE_UPDATE_ATTEMPT',
+          details: {
+            userId: req.user.id,
+            targetUserId: req.params.id,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent')
+          }
+        });
+        return res.status(403).json({ message: "Solo puedes actualizar tu propio perfil" });
       }
 
       const { name, email, phone } = req.body;
 
       // Validate required fields
       if (!name || !email) {
-        return res.status(400).json({ message: "Name and email are required" });
+        return res.status(400).json({ message: "Nombre y email son requeridos" });
       }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      // Validate name length and format
+      if (name.length < 2 || name.length > 100) {
+        return res.status(400).json({ message: "El nombre debe tener entre 2 y 100 caracteres" });
+      }
+
+      // Validate email format with enhanced regex
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({ message: "Invalid email format" });
+        return res.status(400).json({ message: "Formato de email inválido" });
       }
 
-      // Clean phone number to avoid area code duplication
+      // Clean and validate phone number
       let cleanPhone = phone;
       if (cleanPhone) {
         // Remove all non-numeric characters except the first +
         cleanPhone = cleanPhone.replace(/[^\d+]/g, '');
-        
-        // If starts with +504504, clean the duplication
+
+        // Clean duplication patterns
         if (cleanPhone.startsWith('+504504')) {
           cleanPhone = cleanPhone.replace('+504504', '+504');
         }
-        // If starts with +504+504, clean the duplication
         else if (cleanPhone.startsWith('+504+504')) {
           cleanPhone = cleanPhone.replace('+504+504', '+504');
         }
-        // If doesn't start with +504, add it
         else if (!cleanPhone.startsWith('+504')) {
           cleanPhone = `+504${cleanPhone.replace(/^\+/, '')}`;
         }
+
+        // Validate phone format (Honduras: +504 + 8 digits)
+        if (!/^\+504\d{8}$/.test(cleanPhone)) {
+          return res.status(400).json({
+            message: "El teléfono debe tener el formato +504XXXXXXXX (8 dígitos)"
+          });
+        }
       }
 
-      // Check if email is already taken by another user
-      const existingUserWithEmail = await storage.getUserByEmail(email);
-      if (existingUserWithEmail && existingUserWithEmail.id !== req.params.id) {
-        return res.status(400).json({ message: "Email is already taken by another user" });
-      }
+      // Update profile atomically with validation
+      const updatedUser = await updateUserAtomic(
+        req.params.id,
+        { name, email, phone: cleanPhone },
+        async (existingUser) => {
+          // Check if email is already taken by another user
+          if (email !== existingUser.email) {
+            const existingUserWithEmail = await storage.getUserByEmail(email);
+            if (existingUserWithEmail && existingUserWithEmail.id !== req.params.id) {
+              secureLog({
+                level: 'warn',
+                action: 'DUPLICATE_EMAIL_ATTEMPT',
+                details: {
+                  userId: req.user.id,
+                  attemptedEmail: email,
+                  existingUserId: existingUserWithEmail.id,
+                  ipAddress: req.ip
+                }
+              });
+              return false;
+            }
+          }
 
-      // Update user profile
-      const updatedUser = await storage.updateUser(req.params.id, {
-        name,
-        email,
-        phone: cleanPhone || null
+          return true;
+        },
+        {
+          userId: req.user.id,
+          businessAccountId: req.user.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          action: 'UPDATE_PROFILE'
+        }
+      );
+
+      secureLog({
+        level: 'info',
+        action: 'PROFILE_UPDATED',
+        details: {
+          userId: req.user.id,
+          updatedFields: { name: !!name, email: !!email, phone: !!cleanPhone },
+          emailChanged: email !== req.user.email,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent')
+        }
       });
 
-      if (!updatedUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Remove password from response
-      res.json({ ...updatedUser, password: undefined });
+      // Return success response
+      res.json({
+        ...updatedUser,
+        password: undefined,
+        message: "Perfil actualizado exitosamente"
+      });
     } catch (error) {
-      console.error("Error updating profile:", error);
-      res.status(500).json({ message: "Failed to update profile" });
+      secureLog({
+        level: 'error',
+        action: 'PROFILE_UPDATE_ERROR',
+        details: {
+          error: error.message,
+          userId: req.user?.id,
+          ipAddress: req.ip
+        }
+      });
+
+      if (error.message.includes('Validación falló')) {
+        res.status(400).json({ message: "Email ya está en uso por otro usuario" });
+      } else {
+        res.status(500).json({ message: "Error al actualizar perfil" });
+      }
     }
   });
 
@@ -2102,12 +2598,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!company) {
         return res.status(404).json({ message: "Company not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only access companies from their business account
       if (req.user.role !== 'SUPER_ADMIN' && company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       res.json(company);
     } catch (error) {
       console.error("Error fetching company:", error);
@@ -2115,16 +2611,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/companies", requireBusinessAccount, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'create'), async (req: any, res) => {
+  app.post("/api/companies", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'create'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       const companyData = insertCompanySchema.parse(req.body);
-      
+
       // Create company object with businessAccountId
       const finalCompanyData: any = {
         ...companyData,
         businessAccountId: req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.body.businessAccountId || req.businessAccountId)
       };
-      
+
       const company = await storage.createCompany(finalCompanyData);
       res.json(company);
     } catch (error) {
@@ -2133,18 +2629,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/companies/:id", requireBusinessAccount, requireModule('CONTACTS'), async (req: any, res) => {
+  app.put("/api/companies/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       // First check if company exists and user has access
       const existingCompany = await storage.getCompany(req.params.id);
       if (!existingCompany) {
         return res.status(404).json({ message: "Company not found" });
       }
-      
+
       if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const updateData = updateCompanySchema.parse(req.body);
       const company = await storage.updateCompany(req.params.id, updateData);
       res.json(company);
@@ -2154,18 +2650,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/companies/:id", requireBusinessAccount, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'delete'), updateUsageAfterAction('CONTACTS'), async (req: any, res) => {
+  app.delete("/api/companies/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'delete'), updateUsageAfterAction('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       // First check if company exists and user has access
       const existingCompany = await storage.getCompany(req.params.id);
       if (!existingCompany) {
         return res.status(404).json({ message: "Company not found" });
       }
-      
+
       if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const deleted = await storage.deleteCompany(req.params.id);
       if (deleted) {
         res.json({ message: "Company deleted successfully" });
@@ -2193,12 +2689,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/business-accounts/:businessAccountId/modules", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
     try {
       const { businessAccountId } = req.params;
-      
+
       // Security check: non-SUPER_ADMIN can only access their own business account modules
       if (req.user.role !== 'SUPER_ADMIN' && req.user.businessAccountId !== businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const modules = await storage.getBusinessAccountModules(businessAccountId);
       res.json(modules);
     } catch (error) {
@@ -2207,21 +2703,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/enable", requireAuthWithCSRF, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
       const enabledBy = req.user.id;
-      
+
       // Security check: non-SUPER_ADMIN can only enable modules for their own business account
       if (req.user.role !== 'SUPER_ADMIN' && req.user.businessAccountId !== businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const success = await storage.enableModuleForBusinessAccount(businessAccountId, moduleId, enabledBy);
       if (!success) {
         return res.status(400).json({ message: "Failed to enable module" });
       }
-      
+
       res.json({ message: "Module enabled successfully" });
     } catch (error) {
       console.error("Error enabling module:", error);
@@ -2229,20 +2725,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+  app.post("/api/business-accounts/:businessAccountId/modules/:moduleId/disable", requireAuthWithCSRF, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { businessAccountId, moduleId } = req.params;
-      
+
       // Security check: non-SUPER_ADMIN can only disable modules for their own business account
       if (req.user.role !== 'SUPER_ADMIN' && req.user.businessAccountId !== businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const success = await storage.disableModuleForBusinessAccount(businessAccountId, moduleId);
       if (!success) {
         return res.status(400).json({ message: "Failed to disable module" });
       }
-      
+
       res.json({ message: "Module disabled successfully" });
     } catch (error) {
       console.error("Error disabling module:", error);
@@ -2280,12 +2776,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!opportunity) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only access opportunities from their business account
       if (req.user.role !== 'SUPER_ADMIN' && opportunity.company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       res.json(opportunity);
     } catch (error) {
       console.error("Error fetching opportunity:", error);
@@ -2293,38 +2789,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/opportunities", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+  app.post("/api/opportunities", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CRM'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       // Verify company belongs to user's business account
       const companyId = req.body.companyId;
       if (!companyId) {
         return res.status(400).json({ message: "Company ID is required" });
       }
-      
+
       const company = await storage.getCompany(companyId);
       if (!company) {
         return res.status(404).json({ message: "Company not found" });
       }
-      
+
       if (req.user.role !== 'SUPER_ADMIN' && company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Cannot create opportunity for company from different organization" });
       }
-      
+
       // Prepare opportunity data
       let dataWithDefaults = {
         ...req.body,
       };
-      
+
       // Add business account ID for non-SUPER_ADMIN users
       if (req.user.role !== 'SUPER_ADMIN') {
         dataWithDefaults = { ...dataWithDefaults, businessAccountId: req.businessAccountId };
       }
-      
+
       // Convert estimatedCloseDate string to Date if provided
       if (dataWithDefaults.estimatedCloseDate && typeof dataWithDefaults.estimatedCloseDate === 'string') {
         dataWithDefaults.estimatedCloseDate = new Date(dataWithDefaults.estimatedCloseDate);
       }
-      
+
       const opportunityData = insertOpportunitySchema.parse(dataWithDefaults);
       const opportunity = await storage.createOpportunity(opportunityData);
       res.json(opportunity);
@@ -2334,19 +2830,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/opportunities/:id", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+  app.put("/api/opportunities/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CRM'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       // Get opportunity to check access
       const existingOpp = await storage.getOpportunity(req.params.id);
       if (!existingOpp) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only update opportunities from their business account
       if (req.user.role !== 'SUPER_ADMIN' && existingOpp.company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const updateData = updateOpportunitySchema.parse(req.body);
       const opportunity = await storage.updateOpportunity(req.params.id, updateData);
       res.json(opportunity);
@@ -2356,19 +2852,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/opportunities/:id", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+  app.delete("/api/opportunities/:id", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CRM'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       // Get opportunity to check access
       const existingOpp = await storage.getOpportunity(req.params.id);
       if (!existingOpp) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only delete opportunities from their business account
       if (req.user.role !== 'SUPER_ADMIN' && existingOpp.company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const deleted = await storage.deleteOpportunity(req.params.id);
       if (!deleted) {
         return res.status(404).json({ message: "Opportunity not found" });
@@ -2376,15 +2872,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Opportunity deleted successfully" });
     } catch (error) {
       console.error("Error deleting opportunity:", error);
-      
+
       // Check if it's our custom validation error
       if (error instanceof Error && error.message.includes("No se puede eliminar la oportunidad")) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: error.message,
-          code: "HAS_ACTIVITIES" 
+          code: "HAS_ACTIVITIES"
         });
       }
-      
+
       res.status(500).json({ message: "Failed to delete opportunity" });
     }
   });
@@ -2408,12 +2904,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!opportunity) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only access opportunities from their business account
       if (req.user.role !== 'SUPER_ADMIN' && opportunity.company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const activities = await storage.getActivitiesByOpportunity(req.params.id);
       res.json(activities);
     } catch (error) {
@@ -2422,44 +2918,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/activities", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
+  app.post("/api/activities", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CRM'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       console.log("Activity data received:", req.body);
-      
+
       // Validate that authorId is not empty
       if (!req.body.authorId) {
         return res.status(400).json({ message: "Author ID is required" });
       }
-      
+
       // Check if opportunity exists and get its company
       const opportunityId = req.body.opportunityId;
       if (!opportunityId) {
         return res.status(400).json({ message: "Opportunity ID is required" });
       }
-      
+
       const opportunity = await storage.getOpportunity(opportunityId);
       if (!opportunity) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only create activities for opportunities from their business account
       if (req.user.role !== 'SUPER_ADMIN' && opportunity.company.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Cannot create activity for opportunity from different organization" });
       }
-      
+
       // Convert activityDate string to Date object if needed
       let activityPayload = {
         ...req.body,
-        activityDate: typeof req.body.activityDate === 'string' 
-          ? new Date(req.body.activityDate) 
+        activityDate: typeof req.body.activityDate === 'string'
+          ? new Date(req.body.activityDate)
           : req.body.activityDate
       };
-      
+
       // Add business account ID for non-SUPER_ADMIN users
       if (req.user.role !== 'SUPER_ADMIN') {
         activityPayload = { ...activityPayload, businessAccountId: req.businessAccountId };
       }
-      
+
       const activityData = insertActivitySchema.parse(activityPayload);
       const activity = await storage.createActivity(activityData);
       res.json(activity);
@@ -2477,7 +2973,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/reports/stats", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
     try {
       let businessAccountId;
-      
+
       if (req.user.role === 'SUPER_ADMIN') {
         // SUPER_ADMIN can query specific business account or get all data
         businessAccountId = req.query.businessAccountId;
@@ -2486,35 +2982,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const allOpportunities = await storage.getAllOpportunities();
           const allCompanies = await storage.getAllCompanies();
           const allActivities = await storage.getAllActivities();
-          
+
           // Calculate stats for all data
           const totalWon = allOpportunities.filter(opp => opp.status === 'WON').length;
           const totalNegotiation = allOpportunities.filter(opp => opp.status === 'NEGOTIATION').length;
           const totalOpportunities = allOpportunities.length;
           const activeCompanies = allCompanies.filter(company => company.status === 'ACTIVE').length;
-          
+
           const activitiesToday = allActivities.filter(activity => {
             const today = new Date();
             const activityDate = new Date(activity.activityDate);
             return activityDate.toDateString() === today.toDateString();
           }).length;
-          
+
           const opportunitiesByStatus = allOpportunities.reduce((acc, opp) => {
             acc[opp.status] = (acc[opp.status] || 0) + 1;
             return acc;
           }, {} as Record<string, number>);
-          
+
           const opportunitiesBySeller = allOpportunities.reduce((acc, opp) => {
             const sellerName = opp.seller.name;
             acc[sellerName] = (acc[sellerName] || 0) + 1;
             return acc;
           }, {} as Record<string, number>);
-          
+
           const activitiesByType = allActivities.reduce((acc, activity) => {
             acc[activity.type] = (acc[activity.type] || 0) + 1;
             return acc;
           }, {} as Record<string, number>);
-          
+
           return res.json({
             totalWon,
             totalNegotiation,
@@ -2529,7 +3025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         businessAccountId = req.businessAccountId;
       }
-      
+
       const opportunities = await storage.getOpportunities(businessAccountId);
       const companies = await storage.getCompanies(businessAccountId);
       const activities = await storage.getActivities(businessAccountId);
@@ -2561,7 +3057,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const activitiesByType = activities.reduce((acc, activity) => {
         acc[activity.type] = (acc[activity.type] || 0) + 1;
         return acc;
-      }, {} as Record<string, number>); 
+      }, {} as Record<string, number>);
 
       res.json({
         totalWon,
@@ -2587,18 +3083,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/reminders/send-daily", async (req, res) => {
     try {
       console.log('🔔 Enviando recordatorios diarios...');
-      
+
       const result = await reminderService.sendDailyReminders();
-      
+
       res.json({
         message: `Recordatorios enviados: ${result.sent}, Errores: ${result.errors.length}`,
         sent: result.sent,
         errors: result.errors
       });
-      
+
     } catch (error) {
       console.error("Error sending daily reminders:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Error enviando recordatorios diarios",
         error: error instanceof Error ? error.message : "Unknown error"
       });
@@ -2609,71 +3105,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/reminders/send-daily-secure", async (req, res) => {
     try {
       const { token } = req.body;
-      
+
       // Verify token (you can set this in your .env)
       const expectedToken = process.env.REMINDER_TOKEN || 'default-reminder-token';
-      
+
       if (!token || token !== expectedToken) {
-        return res.status(401).json({ 
-          message: "Token de autenticación inválido" 
+        return res.status(401).json({
+          message: "Token de autenticación inválido"
         });
       }
-      
+
       console.log('🔔 Enviando recordatorios diarios (con token)...');
-      
+
       const result = await reminderService.sendDailyReminders();
-      
+
       res.json({
         message: `Recordatorios enviados: ${result.sent}, Errores: ${result.errors.length}`,
         sent: result.sent,
         errors: result.errors
       });
-      
+
     } catch (error) {
       console.error("Error sending daily reminders:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Error enviando recordatorios diarios",
         error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
 
+
   // Get user/seller metrics and performance data
   app.get("/api/users/:id/metrics", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
     try {
       const { id: userId } = req.params;
-      
+
       // Verify user exists and belongs to the business account
       const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
-      
+
       // Security check: non-SUPER_ADMIN can only access users from their business account
       if (req.user.role !== 'SUPER_ADMIN' && user.businessAccountId !== req.businessAccountId) {
         return res.status(403).json({ message: "Acceso denegado" });
       }
-      
+
       // Get all opportunities for this seller
       const allOpportunities = await storage.getOpportunities(req.businessAccountId);
       const userOpportunities = allOpportunities.filter(opp => opp.sellerId === userId);
-      
+
       // Get all activities for opportunities of this seller
       const allActivities = await storage.getActivities(req.businessAccountId);
-      const userActivities = allActivities.filter(activity => 
+      const userActivities = allActivities.filter(activity =>
         userOpportunities.some(opp => opp.id === activity.opportunityId)
       );
-      
+
       // Calculate metrics
       const totalOpportunities = userOpportunities.length;
       const wonOpportunities = userOpportunities.filter(opp => opp.status === 'WON').length;
       const lostOpportunities = userOpportunities.filter(opp => opp.status === 'LOST').length;
-      const inProgressOpportunities = userOpportunities.filter(opp => 
+      const inProgressOpportunities = userOpportunities.filter(opp =>
         ['NEW', 'IN_PROGRESS', 'NEGOTIATION'].includes(opp.status)
       ).length;
-      
+
       const conversionRate = totalOpportunities > 0 ? (wonOpportunities / totalOpportunities) * 100 : 0;
-      
+
       // Activities this week
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -2681,13 +3178,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const activityDate = new Date(activity.activityDate);
         return activityDate >= weekAgo;
       }).length;
-      
+
       // Opportunities by status
       const opportunitiesByStatus = userOpportunities.reduce((acc, opp) => {
         acc[opp.status] = (acc[opp.status] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
-      
+
       // Recent opportunities (last 10)
       const recentOpportunities = userOpportunities
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -2700,7 +3197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           createdAt: opp.createdAt,
           estimatedCloseDate: opp.estimatedCloseDate,
         }));
-      
+
       // Recent activities (last 10)
       const recentActivities = userActivities
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -2713,7 +3210,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           opportunityTitle: userOpportunities.find(opp => opp.id === activity.opportunityId)?.title || 'N/A',
           createdAt: activity.createdAt,
         }));
-      
+
       res.json({
         user: {
           id: user.id,
@@ -2740,22 +3237,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get user login logs
+  app.get("/api/users/:id/login-logs", requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { id: userId } = req.params;
+
+      // Verify user exists and belongs to the business account
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      // Security check: non-SUPER_ADMIN can only access users from their business account
+      if (req.user.role !== 'SUPER_ADMIN' && user.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Acceso denegado" });
+      }
+
+      // For now, return mock data since we don't have login logs stored yet
+      // In a real implementation, this would query a login_logs table
+      const mockLoginLogs = [
+        {
+          id: "1",
+          loginTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+          ipAddress: "192.168.1.100",
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+          success: true,
+          logoutTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          id: "2",
+          loginTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+          ipAddress: "192.168.1.100",
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+          success: true,
+          logoutTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000 + 8 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          id: "3",
+          loginTime: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(), // 6 hours ago
+          ipAddress: "192.168.1.100",
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+          success: true,
+          // No logout time - still logged in
+        },
+        {
+          id: "4",
+          loginTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+          ipAddress: "192.168.1.150",
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          success: false,
+        },
+      ];
+
+      res.json(mockLoginLogs);
+    } catch (error) {
+      console.error("Error fetching user login logs:", error);
+      res.status(500).json({ message: "Error al obtener logs de inicio de sesión" });
+    }
+  });
+
+  // Get individual user by ID
+  app.get("/api/users/:id", requireBusinessAccount, async (req: any, res) => {
+    try {
+      const { id: userId } = req.params;
+
+      // Verify user exists and belongs to the business account
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      // Security check: non-SUPER_ADMIN can only access users from their business account
+      if (req.user.role !== 'SUPER_ADMIN' && user.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Acceso denegado" });
+      }
+
+      // Return user data (excluding sensitive information)
+      const safeUser = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        businessAccountId: user.businessAccountId,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      };
+
+      res.json(safeUser);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Error al obtener usuario" });
+    }
+  });
+
   // Send reminder to specific user
-  app.post("/api/reminders/send-to-user/:userId", requireAuth, async (req, res) => {
+  app.post("/api/reminders/send-to-user/:userId", requireAuthWithCSRF, validateJWTCSRFToken, async (req, res) => {
     try {
       const { userId } = req.params;
-      
+
       const success = await reminderService.sendReminderToUser(userId);
-      
+
       if (success) {
         res.json({ message: "Recordatorio enviado correctamente" });
       } else {
         res.json({ message: "Usuario no tiene oportunidades pendientes" });
       }
-      
+
     } catch (error) {
       console.error("Error sending reminder to user:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Error enviando recordatorio",
         error: error instanceof Error ? error.message : "Unknown error"
       });
@@ -2765,17 +3356,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get alerts for opportunities needing attention
   app.get("/api/alerts", requireBusinessAccount, requireModule('CRM'), async (req: any, res) => {
     try {
-      const businessAccountId = req.user.role === 'SUPER_ADMIN' 
-        ? req.query.businessAccountId 
+      const businessAccountId = req.user.role === 'SUPER_ADMIN'
+        ? req.query.businessAccountId
         : req.businessAccountId;
-      
+
       if (!businessAccountId && req.user.role !== 'SUPER_ADMIN') {
         return res.status(400).json({ message: "Business account required" });
       }
-      
+
       const opportunities = await storage.getOpportunities(businessAccountId);
       const activities = await storage.getActivities(businessAccountId);
-      
+
       const now = new Date();
       const alerts: Array<{
         type: 'stale_opportunity' | 'upcoming_close' | 'no_activity';
@@ -2788,7 +3379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         daysSinceLastActivity?: number;
         daysUntilClose?: number;
       }> = [];
-      
+
       // Group activities by opportunity
       const activitiesByOpportunity = activities.reduce((acc, activity) => {
         if (!acc[activity.opportunityId]) {
@@ -2797,21 +3388,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         acc[activity.opportunityId].push(activity);
         return acc;
       }, {} as Record<string, typeof activities>);
-      
+
       // Check each opportunity
       for (const opp of opportunities) {
         // Skip won/lost opportunities
         if (opp.status === 'WON' || opp.status === 'LOST') continue;
-        
+
         const oppActivities = activitiesByOpportunity[opp.id] || [];
         const lastActivity = oppActivities.length > 0
           ? oppActivities.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
           : null;
-        
+
         const daysSinceLastActivity = lastActivity
           ? Math.floor((now.getTime() - new Date(lastActivity.createdAt).getTime()) / (1000 * 60 * 60 * 24))
           : Math.floor((now.getTime() - new Date(opp.createdAt).getTime()) / (1000 * 60 * 60 * 24));
-        
+
         // Alert: No activity in 7+ days (HIGH severity)
         if (daysSinceLastActivity >= 7) {
           alerts.push({
@@ -2825,18 +3416,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             daysSinceLastActivity,
           });
         }
-        
+
         // Alert: Upcoming close date (3 days or less)
         if (opp.estimatedCloseDate) {
           const closeDate = new Date(opp.estimatedCloseDate);
           const daysUntilClose = Math.floor((closeDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-          
+
           if (daysUntilClose >= 0 && daysUntilClose <= 3) {
             alerts.push({
               type: 'upcoming_close',
               severity: daysUntilClose === 0 ? 'high' : daysUntilClose <= 1 ? 'high' : 'medium',
-              message: daysUntilClose === 0 
-                ? 'Fecha de cierre es hoy' 
+              message: daysUntilClose === 0
+                ? 'Fecha de cierre es hoy'
                 : `Fecha de cierre en ${daysUntilClose} día${daysUntilClose > 1 ? 's' : ''}`,
               opportunityId: opp.id,
               opportunityTitle: opp.title,
@@ -2846,7 +3437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
         }
-        
+
         // Alert: New opportunity with no activity (3+ days)
         if (!lastActivity && daysSinceLastActivity >= 3) {
           alerts.push({
@@ -2861,7 +3452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-      
+
       // Sort by severity (high first) and then by days
       alerts.sort((a, b) => {
         const severityOrder = { high: 0, medium: 1, low: 2 };
@@ -2872,7 +3463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const daysB = b.daysSinceLastActivity ?? b.daysUntilClose ?? 0;
         return daysB - daysA;
       });
-      
+
       res.json(alerts);
     } catch (error) {
       console.error("Error fetching alerts:", error);
@@ -2884,25 +3475,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/reminders/user-data/:userId", requireAuth, async (req, res) => {
     try {
       const { userId } = req.params;
-      
+
       const usersData = await reminderService.getOpenOpportunitiesNeedingFollowup();
       const userData = usersData.find(u => u.userId === userId);
-      
+
       if (!userData) {
         return res.json({
           hasReminders: false,
           message: "No hay oportunidades pendientes"
         });
       }
-      
+
       res.json({
         hasReminders: true,
         data: userData
       });
-      
+
     } catch (error) {
       console.error("Error getting user reminder data:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Error obteniendo datos de recordatorios",
         error: error instanceof Error ? error.message : "Unknown error"
       });
@@ -2917,16 +3508,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM information_schema.tables 
         WHERE table_schema = 'public'
       `);
-      
+
       const businessAccountsResult = await pool.query(`
         SELECT column_name, data_type 
         FROM information_schema.columns 
         WHERE table_name = 'business_accounts'
       `);
-      
-      res.json({ 
+
+      res.json({
         tables: result.rows,
-        business_accounts_columns: businessAccountsResult.rows 
+        business_accounts_columns: businessAccountsResult.rows
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -2942,26 +3533,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM business_accounts 
         WHERE name ILIKE '%onetouch%' OR email ILIKE '%onetouch%'
       `);
-      
+
       if (businessAccountResult.rows.length === 0) {
         return res.json({ message: "OneTouch business account not found" });
       }
-      
+
       const businessAccount = businessAccountResult.rows[0];
-      
+
       // Get users for this business account
       const usersResult = await pool.query(`
         SELECT id, name, email, business_account_id, role
         FROM users 
         WHERE business_account_id = $1
       `, [businessAccount.id]);
-      
+
       // Check company profile
       const profileResult = await pool.query(`
         SELECT * FROM company_profiles 
         WHERE business_account_id = $1
       `, [businessAccount.id]);
-      
+
       // Check business account plans  
       const planResult = await pool.query(`
         SELECT * FROM business_account_plans 
@@ -2969,7 +3560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY created_at DESC
         LIMIT 1
       `, [businessAccount.id]);
-      
+
       res.json({
         business_account: businessAccount,
         users: usersResult.rows,
@@ -3099,25 +3690,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // TEMPORARY: Reset password for luis@onetouch.hn
-  app.post("/api/admin/reset-luis-password", async (req, res) => {
+  app.post("/api/admin/reset-luis-password", requireAuthWithCSRF, validateJWTCSRFToken, async (req, res) => {
     try {
       const newPassword = 'Luis123!';
       const hashedPassword = bcrypt.hashSync(newPassword, 12);
-      
+
       const result = await pool.query(`
         UPDATE users 
         SET password = $1, updated_at = NOW()
         WHERE email = $2
         RETURNING id, name, email, role
       `, [hashedPassword, 'luis@onetouch.hn']);
-      
+
       if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
       console.log('✅ Password reset for luis@onetouch.hn - new password: Luis123!');
-      res.json({ 
-        message: "Password reset successfully", 
+      res.json({
+        message: "Password reset successfully",
         user: result.rows[0],
         newPassword: newPassword
       });
@@ -3128,11 +3719,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Emergency: Reset all non-super-admin user passwords  
-  app.post("/api/admin/emergency-password-reset", async (req, res) => {
+  app.post("/api/admin/emergency-password-reset", requireAuthWithCSRF, validateJWTCSRFToken, async (req, res) => {
     try {
       const defaultPassword = "temp123456";
       const hashedPassword = bcrypt.hashSync(defaultPassword, 12);
-      
+
       // Reset passwords for all users except SUPER_ADMIN
       const updateResult = await pool.query(`
         UPDATE users 
@@ -3140,10 +3731,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE role != 'SUPER_ADMIN'
         RETURNING id, name, email, role, business_account_id
       `, [hashedPassword]);
-      
+
       res.json({
         message: "Emergency password reset completed",
-        temporary_password: defaultPassword, 
+        temporary_password: defaultPassword,
         affected_users: updateResult.rows,
         instructions: "All non-super-admin users can now login with: " + defaultPassword
       });
@@ -3175,7 +3766,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_permissions_business ON user_permissions(business_account_id)`);
-      
+
       res.json({ message: "User permissions table created successfully" });
     } catch (error) {
       console.error("Error creating user permissions table:", error);
@@ -3184,12 +3775,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User permissions management endpoints (only for BUSINESS_ADMIN)
-  
+
   // Get permissions for a specific user
-  app.get("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+  app.get("/api/users/:userId/permissions", requireAuth, requireBusinessAccountWithId, requireModule('USERS'), async (req: any, res) => {
     try {
       const { userId } = req.params;
-      
+
       // Verify user belongs to same business account (except for SUPER_ADMIN)
       if (req.user.role !== 'SUPER_ADMIN') {
         const user = await storage.getUser(userId);
@@ -3197,14 +3788,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ message: "Access denied to user" });
         }
       }
-      
+
       const permissions = await pool.query(`
         SELECT module_type, can_view, can_create, can_edit, can_delete
         FROM user_permissions 
         WHERE user_id = $1
         ORDER BY module_type
       `, [userId]);
-      
+
       // Convert to object format for easier frontend consumption
       const permissionsObj = {};
       permissions.rows.forEach(row => {
@@ -3215,23 +3806,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           canDelete: row.can_delete
         };
       });
-      
+
       res.json(permissionsObj);
     } catch (error) {
       console.error("Error getting user permissions:", error);
       res.status(500).json({ error: error.message });
     }
   });
-  
+
   // Set permissions for a specific user
-  app.post("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+  app.post("/api/users/:userId/permissions", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('USERS'), validateJWTCSRFToken, async (req: any, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      
+
       const { userId } = req.params;
       const { moduleType, canView, canCreate, canEdit, canDelete } = req.body;
-      
+
       // ENHANCED VALIDATION: Comprehensive security checks
       if (req.user.role !== 'SUPER_ADMIN') {
         // Get user with business account validation in transaction
@@ -3241,33 +3832,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
           WHERE id = $1 AND deleted_at IS NULL
           FOR UPDATE
         `, [userId]);
-        
+
         const user = userResult.rows[0];
         if (!user || user.business_account_id !== req.businessAccountId) {
           await client.query('ROLLBACK');
           return res.status(403).json({ message: "Access denied to user" });
         }
-        
+
         // SECURITY: Prevent privilege escalation
         if (user.role === 'BUSINESS_ADMIN' || user.role === 'SUPER_ADMIN') {
           await client.query('ROLLBACK');
           return res.status(403).json({ message: "Cannot modify admin permissions" });
         }
-        
+
         // BUSINESS_ADMIN cannot modify their own permissions
         if (userId === req.user.id) {
           await client.query('ROLLBACK');
           return res.status(403).json({ message: "Cannot modify your own permissions" });
         }
       }
-      
+
       // VALIDATION: Ensure module type is valid
       const validModules = ['USERS', 'COMPANIES', 'CRM', 'REPORTS'];
       if (!validModules.includes(moduleType)) {
         await client.query('ROLLBACK');
         return res.status(400).json({ message: "Invalid module type" });
       }
-      
+
       // Upsert permissions
       await pool.query(`
         INSERT INTO user_permissions (user_id, business_account_id, module_type, can_view, can_create, can_edit, can_delete, created_by)
@@ -3281,54 +3872,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updated_at = NOW(),
           created_by = EXCLUDED.created_by
       `, [userId, req.businessAccountId, moduleType, canView, canCreate, canEdit, canDelete, req.user.id]);
-      
+
       res.json({ message: "Permissions updated successfully" });
     } catch (error) {
       console.error("Error setting user permissions:", error);
       res.status(500).json({ error: error.message });
     }
   });
-  
+
   // Bulk update permissions for a user (all modules at once)
-  app.put("/api/users/:userId/permissions", requireAuth, requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), async (req: any, res) => {
+  app.put("/api/users/:userId/permissions", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('USERS'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { userId } = req.params;
       const { permissions } = req.body; // { USERS: { canView: true, ... }, COMPANIES: { ... } }
-      
-      // Verify user belongs to same business account (except for SUPER_ADMIN)
-      if (req.user.role !== 'SUPER_ADMIN') {
-        const user = await storage.getUser(userId);
-        if (!user || user.businessAccountId !== req.businessAccountId) {
-          return res.status(403).json({ message: "Access denied to user" });
-        }
-        
-        // BUSINESS_ADMIN cannot modify their own permissions
-        if (userId === req.user.id) {
-          return res.status(403).json({ message: "Cannot modify your own permissions" });
-        }
+
+      // Validate permissions input
+      if (!permissions || typeof permissions !== 'object') {
+        return res.status(400).json({ message: "Permisos inválidos" });
       }
-      
-      // Begin transaction
-      await pool.query('BEGIN');
-      
-      try {
-        // Delete existing permissions for this user
-        await pool.query('DELETE FROM user_permissions WHERE user_id = $1', [userId]);
-        
-        // Insert new permissions
-        for (const [moduleType, perms] of Object.entries(permissions)) {
-          await pool.query(`
-            INSERT INTO user_permissions (user_id, business_account_id, module_type, can_view, can_create, can_edit, can_delete, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          `, [userId, req.businessAccountId, moduleType, perms.canView, perms.canCreate, perms.canEdit, perms.canDelete, req.user.id]);
+
+      // Update permissions atomically with comprehensive validation
+      await updateUserPermissionsAtomic(
+        userId,
+        permissions,
+        async (existingUser) => {
+          // Validate user modification permissions
+          const canModify = validateUserModification(
+            req.user.role as UserRole,
+            req.user.businessAccountId,
+            existingUser.business_account_id,
+            existingUser.role as UserRole,
+            {
+              performedBy: req.user.id,
+              businessAccountId: req.businessAccountId,
+              ipAddress: req.ip,
+              userAgent: req.get('User-Agent')
+            }
+          );
+
+          if (!canModify) {
+            secureLog({
+              level: 'warn',
+              action: 'UNAUTHORIZED_PERMISSION_MODIFICATION_ATTEMPT',
+              details: {
+                userId: req.user.id,
+                targetUserId: existingUser.id,
+                targetUserRole: existingUser.role,
+                userRole: req.user.role,
+                businessAccountId: req.businessAccountId,
+                targetBusinessAccountId: existingUser.businessAccountId,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                modules: Object.keys(permissions)
+              }
+            });
+            return false;
+          }
+
+          // BUSINESS_ADMIN cannot modify their own permissions
+          if (req.user.role === 'BUSINESS_ADMIN' && userId === req.user.id) {
+            secureLog({
+              level: 'warn',
+              action: 'SELF_PERMISSION_MODIFICATION_BLOCKED',
+              details: {
+                userId: req.user.id,
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent')
+              }
+            });
+            return false;
+          }
+
+          // Validate that user can only modify users in same business account
+          if (req.user.role !== 'SUPER_ADMIN' && existingUser.business_account_id !== req.user.businessAccountId) {
+            return false;
+          }
+
+          return true;
+        },
+        {
+          userId: req.user.id,
+          businessAccountId: req.businessAccountId,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          action: 'UPDATE_USER_PERMISSIONS'
         }
-        
-        await pool.query('COMMIT');
-        res.json({ message: "All permissions updated successfully" });
-      } catch (error) {
-        await pool.query('ROLLBACK');
-        throw error;
-      }
+      );
+
+      res.json({ message: "Permisos actualizados exitosamente" });
     } catch (error) {
       console.error("Error bulk updating user permissions:", error);
       res.status(500).json({ error: error.message });
@@ -3339,7 +3970,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/migrate-onboarding-simple", async (req, res) => {
     try {
       console.log('🚀 Starting simple onboarding migration...');
-      
+
       // Execute SQL statements directly
       const statements = [
         'ALTER TABLE business_accounts ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE',
@@ -3370,7 +4001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'CREATE INDEX IF NOT EXISTS idx_company_profiles_business_id ON company_profiles(business_account_id)',
         'CREATE INDEX IF NOT EXISTS idx_business_plans_active ON business_account_plans(business_account_id, is_active)'
       ];
-      
+
       for (const statement of statements) {
         if (statement.trim()) {
           try {
@@ -3381,7 +4012,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
       }
-      
+
       console.log('✅ Simple onboarding migration executed successfully');
       res.json({ message: "Simple onboarding migration completed successfully" });
     } catch (error) {
@@ -3394,7 +4025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/migrate-onboarding", async (req, res) => {
     try {
       console.log('🚀 Starting onboarding migration...');
-      
+
       // Step 1: Add columns to business_accounts
       try {
         await pool.query(`
@@ -3462,7 +4093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (indexError) {
         console.log('⚠️ Indexes already exist or failed:', indexError.message);
       }
-      
+
       console.log('✅ Onboarding migration executed successfully');
       res.json({ message: "Onboarding migration completed successfully" });
     } catch (error) {
@@ -3481,11 +4112,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       FROM business_accounts 
       WHERE id = $1
     `, [businessAccountId]);
-    
+
     if (result.rows.length === 0) {
       return null;
     }
-    
+
     const account = result.rows[0];
     return {
       onboarding_completed: account.onboarding_completed,
@@ -3502,11 +4133,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { businessAccountId } = req.params;
       const status = await checkOnboardingStatus(businessAccountId);
-      
+
       if (!status) {
         return res.status(404).json({ error: "Business account not found" });
       }
-      
+
       res.json(status);
     } catch (error) {
       console.error("Error checking onboarding status:", error);
@@ -3530,11 +4161,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/onboarding/profile", async (req, res) => {
     try {
       const { businessAccountId, industry, employeeCount, website } = req.body;
-      
+
       if (!businessAccountId || !industry || !employeeCount) {
         return res.status(400).json({ error: "businessAccountId, industry, and employeeCount are required" });
       }
-      
+
       // Insert or update company profile
       await pool.query(`
         INSERT INTO company_profiles (business_account_id, industry, employee_count, website)
@@ -3546,14 +4177,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           website = $4,
           updated_at = NOW()
       `, [businessAccountId, industry, employeeCount, website || null]);
-      
+
       // Update business account profile_completed flag
       await pool.query(`
         UPDATE business_accounts 
         SET profile_completed = true, updated_at = NOW()
         WHERE id = $1
       `, [businessAccountId]);
-      
+
       console.log(`✅ Profile saved for business account: ${businessAccountId}`);
       res.json({ success: true, message: "Profile saved successfully" });
     } catch (error) {
@@ -3566,22 +4197,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/onboarding/plan", async (req, res) => {
     try {
       const { businessAccountId, planId, billingCycle } = req.body;
-      
+
       if (!businessAccountId || !planId || !billingCycle) {
         return res.status(400).json({ error: "businessAccountId, planId, and billingCycle are required" });
       }
-      
+
       // Get plan details to calculate trial end date and pricing
       const plan = await storage.getPlan(planId);
       if (!plan) {
         return res.status(404).json({ error: "Plan not found" });
       }
-      
+
       // Calculate trial end date based on plan's trial days
       const trialStartDate = new Date();
       const trialEndDate = new Date();
       trialEndDate.setDate(trialEndDate.getDate() + plan.trialDays);
-      
+
       // Determine price based on billing cycle
       let totalAmount = 0;
       if (billingCycle === 'monthly') {
@@ -3589,14 +4220,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (billingCycle === 'annual') {
         totalAmount = parseFloat(plan.annualPrice || plan.price) * 12;
       }
-      
+
       // First, deactivate any existing plans for this business account
       await pool.query(`
         UPDATE business_account_plans 
         SET status = 'CANCELLED', updated_at = NOW()
         WHERE business_account_id = $1 AND status IN ('TRIAL', 'ACTIVE')
       `, [businessAccountId]);
-      
+
       // Create new business account plan using the correct storage function
       const newSubscription = await storage.createBusinessAccountPlan({
         businessAccountId,
@@ -3611,29 +4242,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalAmount,
         currency: 'USD'
       });
-      
+
       // CRITICAL FIX: Update business account plan field for UnifiedPermissionService
       await pool.query(
         'UPDATE business_accounts SET plan = $1, plan_selected = true, updated_at = NOW() WHERE id = $2',
         [plan.name, businessAccountId]
       );
-      
+
       console.log(`✅ Updated business account plan field: ${businessAccountId} -> ${plan.name}`);
-      
+
       // Enable modules included in the plan automatically
       const planModules = await storage.getPlanModules(planId);
       const includedModules = planModules.filter(module => module.isIncluded);
-      
+
       // Helper function to get moduleId from moduleType
       const getModuleId = async (moduleType: string): Promise<string | null> => {
         const moduleQuery = await pool.query('SELECT id FROM modules WHERE type = $1', [moduleType]);
         return moduleQuery.rows.length > 0 ? moduleQuery.rows[0].id : null;
       };
-      
+
       // Get SUPER_ADMIN user ID for automatic module enabling
       const systemUserResult = await pool.query('SELECT id FROM users WHERE role = \'SUPER_ADMIN\' LIMIT 1');
       const systemUserId = systemUserResult.rows.length > 0 ? systemUserResult.rows[0].id : null;
-      
+
       const enabledModuleTypes = [];
       for (const module of includedModules) {
         try {
@@ -3650,10 +4281,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Continue with other modules even if one fails
         }
       }
-      
+
       console.log(`✅ Plan selected for business account: ${businessAccountId} - ${plan.name} (Trial until ${trialEndDate.toISOString()})`);
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Plan selected successfully",
         subscription: newSubscription,
         enabledModules: enabledModuleTypes
@@ -3668,38 +4299,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/onboarding/complete", async (req, res) => {
     try {
       const { businessAccountId } = req.body;
-      
+
       if (!businessAccountId) {
         return res.status(400).json({ error: "businessAccountId is required" });
       }
-      
+
       // Check if profile and plan are completed
       const status = await checkOnboardingStatus(businessAccountId);
-      
+
       if (!status) {
         return res.status(404).json({ error: "Business account not found" });
       }
-      
+
       // Check if there's an active subscription (instead of relying on plan_selected flag)
       const hasActivePlan = await pool.query(`
         SELECT id FROM business_account_plans 
         WHERE business_account_id = $1 AND status IN ('TRIAL', 'ACTIVE')
       `, [businessAccountId]);
-      
+
       if (!status.profile_completed || hasActivePlan.rows.length === 0) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Cannot complete onboarding: profile and plan selection must be completed first",
           status: { ...status, has_active_plan: hasActivePlan.rows.length > 0 }
         });
       }
-      
+
       // Mark onboarding as completed AND plan as selected
       await pool.query(`
         UPDATE business_accounts 
         SET onboarding_completed = true, plan_selected = true, updated_at = NOW()
         WHERE id = $1
       `, [businessAccountId]);
-      
+
       console.log(`✅ Onboarding completed for business account: ${businessAccountId}`);
       res.json({ success: true, message: "Onboarding completed successfully" });
     } catch (error) {
@@ -3712,11 +4343,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/admin/delete-business-by-email/:email", async (req, res) => {
     try {
       const { email } = req.params;
-      
+
       if (!email) {
         return res.status(400).json({ message: "Email is required" });
       }
-      
+
       // Find user and business account
       const userQuery = await pool.query(`
         SELECT u.id as user_id, u.name as user_name, u.business_account_id, ba.name as business_name
@@ -3724,28 +4355,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         JOIN business_accounts ba ON u.business_account_id = ba.id 
         WHERE u.email = $1
       `, [email]);
-      
+
       if (userQuery.rows.length === 0) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
       const user = userQuery.rows[0];
-      
+
       // Delete user first (foreign key constraint)
       await pool.query('DELETE FROM users WHERE id = $1', [user.user_id]);
       console.log(`✅ Deleted user: ${user.user_name} (${email})`);
-      
+
       // Delete business account
       await pool.query('DELETE FROM business_accounts WHERE id = $1', [user.business_account_id]);
       console.log(`✅ Deleted business account: ${user.business_name}`);
-      
-      res.json({ 
+
+      res.json({
         message: "Business account and user deleted successfully",
         deletedUser: user.user_name,
         deletedBusiness: user.business_name,
         email: email
       });
-      
+
     } catch (error) {
       console.error("Error deleting business account:", error);
       res.status(500).json({ message: "Failed to delete business account" });
@@ -3756,20 +4387,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/test-business-welcome", async (req, res) => {
     try {
       const { to, companyName, responsibleName, tempPassword } = req.body;
-      
+
       if (!to || !companyName || !responsibleName || !tempPassword) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      
+
       const { sendBusinessWelcomeTemplate } = await import('./services/brevoTemplateService');
-      
+
       const success = await sendBusinessWelcomeTemplate({
         to,
         companyName,
         responsibleName,
         tempPassword
       });
-      
+
       if (success) {
         res.json({ message: "Business welcome template sent successfully", status: "success" });
       } else {
@@ -3784,11 +4415,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/test-email", async (req, res) => {
     try {
       const emailTo = req.body.to || "luis@onetouch.hn";
-      
+
       const success = await sendEmail({
         to: emailTo,
         toName: "Luis",
-        from: "noreply@crm-moderno.com", 
+        from: "noreply@crm-moderno.com",
         fromName: "CRM Moderno",
         subject: "Test email from CRM Moderno",
         htmlContent: "<h1>¡Email funcionando!</h1><p>El servicio de email con Brevo está configurado correctamente.</p><p>Este es un email de prueba enviado desde tu CRM.</p>",
@@ -3820,7 +4451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/plans", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.post("/api/plans", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const planData = insertPlanSchema.parse(req.body);
       const plan = await storage.createPlan(planData);
@@ -3831,16 +4462,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/plans/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/plans/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const planData = insertPlanSchema.partial().parse(req.body);
       const plan = await storage.updatePlan(id, planData);
-      
+
       if (!plan) {
         return res.status(404).json({ message: "Plan no encontrado" });
       }
-      
+
       res.json(plan);
     } catch (error) {
       console.error("Error updating plan:", error);
@@ -3848,50 +4479,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/plans/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.delete("/api/plans/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const deleted = await storage.deletePlan(id);
-      
+
       if (!deleted) {
         return res.status(404).json({ message: "Plan no encontrado" });
       }
-      
+
       res.json({ message: "Plan eliminado correctamente" });
     } catch (error) {
       console.error("Error deleting plan:", error);
-      
+
       // Check if it's a validation error (plan in use)
       if (error instanceof Error && error.message.includes("está siendo usado por")) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: error.message,
           type: "PLAN_IN_USE"
         });
       }
-      
+
       res.status(500).json({ message: "Error al eliminar plan" });
     }
   });
 
   // Update Plan Dual Prices (Monthly and Annual) with Customer Application Options
-  app.put("/api/plans/:id/prices", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/plans/:id/prices", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { monthlyPrice, annualPrice, applyToExistingCustomers } = req.body;
-      
+
       // Validate prices
-      if ((!monthlyPrice && !annualPrice) || 
-          (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
-          (annualPrice && isNaN(parseFloat(annualPrice)))) {
+      if ((!monthlyPrice && !annualPrice) ||
+        (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
+        (annualPrice && isNaN(parseFloat(annualPrice)))) {
         return res.status(400).json({ message: "Al menos un precio válido es requerido (mensual o anual)" });
       }
-      
+
       // Get current plan
       const currentPlan = await storage.getPlan(id);
       if (!currentPlan) {
         return res.status(404).json({ message: "Plan no encontrado" });
       }
-      
+
       // Update the plan prices
       const updateData: any = {};
       if (monthlyPrice) {
@@ -3901,13 +4532,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (annualPrice) {
         updateData.annualPrice = annualPrice.toString();
       }
-      
+
       const updatedPlan = await storage.updatePlan(id, updateData);
-      
+
       if (!updatedPlan) {
         return res.status(500).json({ message: "Error al actualizar plan" });
       }
-      
+
       // If applyToExistingCustomers is true, update all existing subscriptions
       if (applyToExistingCustomers === true) {
         try {
@@ -3916,22 +4547,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             monthlyPrice: monthlyPrice?.toString(),
             annualPrice: annualPrice?.toString()
           });
-          
+
           console.log(`Updated dual prices for existing customers using plan ${id}`);
         } catch (customerUpdateError) {
           console.error("Error updating existing customer plan prices:", customerUpdateError);
           // Continue execution - log error but don't fail the plan update
         }
       }
-      
+
       res.json({
         plan: updatedPlan,
-        message: applyToExistingCustomers 
-          ? "Plan actualizado y precios aplicados a clientes existentes" 
+        message: applyToExistingCustomers
+          ? "Plan actualizado y precios aplicados a clientes existentes"
           : "Plan actualizado para nuevos clientes únicamente",
         appliedToExisting: applyToExistingCustomers || false
       });
-      
+
     } catch (error) {
       console.error("Error updating plan prices:", error);
       res.status(500).json({ message: "Error al actualizar precios del plan" });
@@ -3949,7 +4580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/products", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.post("/api/products", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const productData = insertProductSchema.parse(req.body);
       const product = await storage.createProduct(productData);
@@ -3960,16 +4591,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/products/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/products/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const productData = insertProductSchema.partial().parse(req.body);
       const product = await storage.updateProduct(id, productData);
-      
+
       if (!product) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
-      
+
       res.json(product);
     } catch (error) {
       console.error("Error updating product:", error);
@@ -3977,62 +4608,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/products/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.delete("/api/products/:id", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const deleted = await storage.deleteProduct(id);
-      
+
       if (!deleted) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
-      
+
       res.json({ message: "Producto eliminado correctamente" });
     } catch (error) {
       console.error("Error deleting product:", error);
-      
+
       // Check if it's a validation error (product in use)
       if (error instanceof Error && error.message.includes("está siendo usado por")) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: error.message,
           type: "PRODUCT_IN_USE"
         });
       }
-      
+
       res.status(500).json({ message: "Error al eliminar producto" });
     }
   });
 
   // Update Product Price with Customer Application Options (Legacy endpoint)
-  app.put("/api/products/:id/price", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/products/:id/price", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { price, billingFrequency, applyToExistingCustomers } = req.body;
-      
+
       // Validate price and billingFrequency
       if (!price || isNaN(parseFloat(price))) {
         return res.status(400).json({ message: "Precio válido es requerido" });
       }
-      
+
       if (!billingFrequency || !['MONTHLY', 'ANNUAL'].includes(billingFrequency)) {
         return res.status(400).json({ message: "Frecuencia de facturación válida es requerida" });
       }
-      
+
       // Get current product
       const currentProduct = await storage.getProduct(id);
       if (!currentProduct) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
-      
+
       // Update the product price and billing frequency
       const updatedProduct = await storage.updateProduct(id, {
         price: price.toString(),
         billingFrequency
       });
-      
+
       if (!updatedProduct) {
         return res.status(500).json({ message: "Error al actualizar producto" });
       }
-      
+
       // If applyToExistingCustomers is true, update all existing subscriptions
       if (applyToExistingCustomers === true) {
         try {
@@ -4041,21 +4672,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             unitPrice: price.toString(),
             billingFrequency
           });
-          
+
           console.log(`Updated price for existing customers using product ${id}`);
         } catch (updateError) {
           console.error("Error updating existing customer prices:", updateError);
           // Don't fail the main operation, just log the error
         }
       }
-      
-      res.json({ 
-        message: applyToExistingCustomers 
-          ? "Precio actualizado para producto y clientes existentes" 
+
+      res.json({
+        message: applyToExistingCustomers
+          ? "Precio actualizado para producto y clientes existentes"
           : "Precio actualizado solo para nuevos clientes",
-        product: updatedProduct 
+        product: updatedProduct
       });
-      
+
     } catch (error) {
       console.error("Error updating product price:", error);
       res.status(500).json({ message: "Error al actualizar precio del producto" });
@@ -4063,24 +4694,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update Product Dual Prices (Monthly and Annual) with Customer Application Options
-  app.put("/api/products/:id/prices", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.put("/api/products/:id/prices", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { monthlyPrice, annualPrice, applyToExistingCustomers } = req.body;
-      
+
       // Validate prices
-      if ((!monthlyPrice && !annualPrice) || 
-          (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
-          (annualPrice && isNaN(parseFloat(annualPrice)))) {
+      if ((!monthlyPrice && !annualPrice) ||
+        (monthlyPrice && isNaN(parseFloat(monthlyPrice))) ||
+        (annualPrice && isNaN(parseFloat(annualPrice)))) {
         return res.status(400).json({ message: "Al menos un precio válido es requerido (mensual o anual)" });
       }
-      
+
       // Get current product
       const currentProduct = await storage.getProduct(id);
       if (!currentProduct) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
-      
+
       // Update the product prices
       const updateData: any = {};
       if (monthlyPrice) {
@@ -4090,13 +4721,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (annualPrice) {
         updateData.annualPrice = annualPrice.toString(); // Use camelCase for the storage method
       }
-      
+
       const updatedProduct = await storage.updateProduct(id, updateData);
-      
+
       if (!updatedProduct) {
         return res.status(500).json({ message: "Error al actualizar producto" });
       }
-      
+
       // If applyToExistingCustomers is true, update all existing subscriptions
       if (applyToExistingCustomers === true) {
         try {
@@ -4106,21 +4737,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             monthlyPrice: monthlyPrice?.toString(),
             annualPrice: annualPrice?.toString()
           });
-          
+
           console.log(`Updated dual prices for existing customers using product ${id}`);
         } catch (updateError) {
           console.error("Error updating existing customer prices:", updateError);
           // Don't fail the main operation, just log the error
         }
       }
-      
-      res.json({ 
-        message: applyToExistingCustomers 
-          ? "Precios actualizados para producto y clientes existentes" 
+
+      res.json({
+        message: applyToExistingCustomers
+          ? "Precios actualizados para producto y clientes existentes"
           : "Precios actualizados solo para nuevos clientes",
-        product: updatedProduct 
+        product: updatedProduct
       });
-      
+
     } catch (error) {
       console.error("Error updating product prices:", error);
       res.status(500).json({ message: "Error al actualizar precios del producto" });
@@ -4134,7 +4765,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!planId) {
         return res.status(400).json({ message: "Plan ID is required" });
       }
-      
+
       const modules = await storage.getPlanModules(planId);
       res.json(modules);
     } catch (error) {
@@ -4143,7 +4774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/plan-modules", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.post("/api/plan-modules", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       const planModuleData = insertPlanModuleSchema.parse(req.body);
       const planModule = await storage.createPlanModule(planModuleData);
@@ -4154,7 +4785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/plan-modules/:planId", requireAuth, requireSuperAdmin, async (req, res) => {
+  app.delete("/api/plan-modules/:planId", requireAuthWithCSRF, requireSuperAdmin, validateJWTCSRFToken, async (req, res) => {
     try {
       await storage.deletePlanModules(req.params.planId);
       res.json({ message: "Plan modules deleted successfully" });
@@ -4192,30 +4823,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/subscription", requireAuth, requireBusinessAccount, async (req: any, res) => {
     try {
       const businessAccountId = req.businessAccountId;
-      
+
       // Get current plan
       const currentPlan = await storage.getBusinessAccountPlan(businessAccountId);
-      
+
       // Get additional products
       const additionalProducts = await storage.getBusinessAccountProducts(businessAccountId);
-      
+
       // Get usage data
       const usageRecords = await storage.getPlanUsage(businessAccountId);
       const usage: Record<string, { current: number; limit: number | null }> = {};
-      
+
       for (const record of usageRecords) {
         const currentCount = await storage.getCurrentUsageCount(businessAccountId, record.moduleType);
-        
+
         // Get limit from plan modules
         let limit = null;
         if (currentPlan?.plan.modules) {
           const planModule = currentPlan.plan.modules.find(m => m.moduleType === record.moduleType);
           limit = planModule?.itemLimit || null;
         }
-        
+
         usage[record.moduleType] = { current: currentCount, limit };
       }
-      
+
       res.json({
         currentPlan,
         additionalProducts,
@@ -4228,20 +4859,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Change Plan
-  app.post("/api/subscription/change-plan", requireAuth, requireBusinessAccount, async (req: any, res) => {
+  app.post("/api/subscription/change-plan", requireAuthWithCSRF, requireBusinessAccountWithId, validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { planId } = req.body;
       const businessAccountId = req.businessAccountId;
-      
+
       // Validate plan exists and is active
       const newPlan = await storage.getPlan(planId);
       if (!newPlan || newPlan.status !== 'ACTIVE') {
         return res.status(400).json({ message: "Plan no válido" });
       }
-      
+
       // Check current subscription
       const currentSubscription = await storage.getBusinessAccountPlan(businessAccountId);
-      
+
       if (currentSubscription) {
         // Update existing subscription
         await storage.updateBusinessAccountPlan(currentSubscription.id, {
@@ -4253,7 +4884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Create new subscription
         const trialEndDate = new Date();
         trialEndDate.setDate(trialEndDate.getDate() + newPlan.trialDays);
-        
+
         await storage.createBusinessAccountPlan({
           businessAccountId,
           planId,
@@ -4265,7 +4896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           autoRenew: true
         });
       }
-      
+
       res.json({ message: "Plan actualizado correctamente" });
     } catch (error) {
       console.error("Error changing plan:", error);
@@ -4274,19 +4905,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Add Product
-  app.post("/api/subscription/add-product", requireAuth, requireBusinessAccount, async (req: any, res) => {
+  app.post("/api/subscription/add-product", requireAuthWithCSRF, requireBusinessAccountWithId, validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { productId, quantity = 1 } = req.body;
       const businessAccountId = req.businessAccountId;
-      
+
       // Validate product exists and is active
       const product = await storage.getProduct(productId);
       if (!product || !product.isActive) {
         return res.status(400).json({ message: "Producto no válido" });
       }
-      
+
       const totalAmount = parseFloat(product.price) * quantity;
-      
+
       await storage.createBusinessAccountProduct({
         businessAccountId,
         productId,
@@ -4297,7 +4928,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         billingFrequency: product.billingFrequency,
         autoRenew: true
       });
-      
+
       res.json({ message: "Producto agregado correctamente" });
     } catch (error) {
       console.error("Error adding product:", error);
@@ -4306,25 +4937,385 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Remove Product
-  app.delete("/api/subscription/products/:productId", requireAuth, requireBusinessAccount, async (req: any, res) => {
+  app.delete("/api/subscription/products/:productId", requireAuthWithCSRF, requireBusinessAccountWithId, validateJWTCSRFToken, async (req: any, res) => {
     try {
       const { productId } = req.params;
       const businessAccountId = req.businessAccountId;
-      
+
       // Find the business account product
       const products = await storage.getBusinessAccountProducts(businessAccountId);
       const productToRemove = products.find(p => p.id === productId);
-      
+
       if (!productToRemove) {
         return res.status(404).json({ message: "Producto no encontrado en tu suscripción" });
       }
-      
+
       await storage.deleteBusinessAccountProduct(productId);
-      
+
       res.json({ message: "Producto eliminado correctamente" });
     } catch (error) {
       console.error("Error removing product:", error);
       res.status(500).json({ message: "Error al eliminar producto" });
+    }
+  });
+
+  // =====================================================
+  // UPSELLING & BILLING ENDPOINTS
+  // =====================================================
+  
+  // Simple stub for upselling opportunities (to prevent 404 errors)
+  app.get("/api/upsell/opportunities", requireAuth, requireBusinessAccount, async (req: any, res) => {
+    try {
+      // Return empty opportunities for now
+      res.json({
+        opportunities: [],
+        accountStatus: { isActive: true }
+      });
+    } catch (error) {
+      console.error("Error getting upsell opportunities:", error);
+      res.status(500).json({ message: "Error al obtener oportunidades de upselling" });
+    }
+  });
+
+  // TODO: Other endpoints are temporarily disabled
+  /*
+  // Import middleware and services
+  const { checkAccountStatus, requireActiveAccount, includeAccountStatus, requireActionPermission, checkUserLimits } = require('./middleware/accountStatusMiddleware');
+  const { upsellService } = require('./services/upsellService');
+  const { suspensionService } = require('./services/suspensionService');
+  const { stripeService } = require('./services/stripeService');
+
+  // Get upsell opportunities
+  app.get("/api/upsell/opportunities", requireAuth, requireBusinessAccount, checkAccountStatus, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      const opportunities = await upsellService.detectUpsellOpportunities(businessAccountId);
+      
+      res.json({
+        opportunities,
+        accountStatus: req.accountStatus
+      });
+    } catch (error) {
+      console.error("Error getting upsell opportunities:", error);
+      res.status(500).json({ message: "Error al obtener oportunidades de upselling" });
+    }
+  });
+
+  // Execute auto-upsell (for user limits)
+  app.post("/api/upsell/auto-upgrade", requireAuth, requireBusinessAccount, requireActiveAccount, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      const triggeredByUserId = req.user.id;
+      
+      const result = await upsellService.executeAutoUpsell(businessAccountId, triggeredByUserId);
+      
+      if (result.success) {
+        res.json({
+          message: result.message,
+          purchase: {
+            id: result.purchaseId,
+            newLimit: result.newLimit,
+            proratedAmount: result.proratedAmount
+          }
+        });
+      } else {
+        res.status(400).json({
+          error: 'AUTO_UPGRADE_FAILED',
+          message: result.message
+        });
+      }
+    } catch (error) {
+      console.error("Error executing auto-upgrade:", error);
+      res.status(500).json({ message: "Error al ejecutar auto-upgrade" });
+    }
+  });
+
+  // Execute manual purchase
+  app.post("/api/upsell/purchase", requireAuth, requireBusinessAccount, requireActiveAccount, async (req: any, res) => {
+    try {
+      const { productId, quantity = 1 } = req.body;
+      const businessAccountId = req.businessAccountId;
+      const triggeredByUserId = req.user.id;
+      
+      if (!productId) {
+        return res.status(400).json({ message: "Product ID es requerido" });
+      }
+      
+      const result = await upsellService.executeManualUpsell(
+        businessAccountId, 
+        productId, 
+        quantity, 
+        triggeredByUserId
+      );
+      
+      if (result.success) {
+        res.json({
+          message: result.message,
+          purchase: {
+            id: result.purchaseId,
+            invoiceId: result.stripeInvoiceId,
+            newLimit: result.newLimit,
+            proratedAmount: result.proratedAmount
+          }
+        });
+      } else {
+        res.status(400).json({
+          error: 'PURCHASE_FAILED',
+          message: result.message
+        });
+      }
+    } catch (error) {
+      console.error("Error executing purchase:", error);
+      res.status(500).json({ message: "Error al procesar compra" });
+    }
+  });
+
+  // Get purchase history
+  app.get("/api/billing/history", requireAuth, requireBusinessAccount, checkAccountStatus, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      const history = await upsellService.getPurchaseHistory(businessAccountId);
+      
+      res.json(history);
+    } catch (error) {
+      console.error("Error getting purchase history:", error);
+      res.status(500).json({ message: "Error al obtener historial de compras" });
+    }
+  });
+
+  // Get billing information
+  app.get("/api/billing/info", requireAuth, requireBusinessAccount, checkAccountStatus, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      const billingInfo = await stripeService.getBillingInfo(businessAccountId);
+      const suspensionInfo = await suspensionService.getSuspensionInfo(businessAccountId);
+      
+      res.json({
+        ...billingInfo,
+        suspension: suspensionInfo
+      });
+    } catch (error) {
+      console.error("Error getting billing info:", error);
+      res.status(500).json({ message: "Error al obtener información de facturación" });
+    }
+  });
+
+  // Stripe webhook endpoint
+  app.post("/api/webhooks/stripe", async (req: any, res) => {
+    try {
+      const sig = req.headers['stripe-signature'];
+      const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+      
+      if (!endpointSecret) {
+        return res.status(400).json({ message: "Stripe webhook secret not configured" });
+      }
+      
+      // Verify webhook signature and construct event
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      let event;
+      
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+      } catch (err) {
+        console.error('Webhook signature verification failed:', err.message);
+        return res.status(400).json({ message: `Webhook signature verification failed: ${err.message}` });
+      }
+      
+      // Handle the webhook event
+      await stripeService.handleWebhook(event);
+      
+      res.json({ received: true });
+    } catch (error) {
+      console.error("Error handling Stripe webhook:", error);
+      res.status(500).json({ message: "Error al procesar webhook de Stripe" });
+    }
+  });
+  */
+
+  // =====================================================
+  // ENHANCED USER MANAGEMENT
+  // =====================================================
+
+  // Enhanced user creation with limit validation
+  app.post("/api/users-enhanced", requireAuth, requireBusinessAccount, requireRole(['BUSINESS_ADMIN', 'SUPER_ADMIN']), checkUserLimits, requireActionPermission('create_user'), async (req: any, res) => {
+    try {
+      const { name, email, role, phone, permissions } = req.body;
+      const businessAccountId = req.businessAccountId;
+      const createdByUserId = req.user.id;
+      
+      // Validate required fields
+      if (!name || !email || !role) {
+        return res.status(400).json({ message: "Nombre, email y rol son requeridos" });
+      }
+      
+      // Create user with automatic permission assignment
+      const result = await createUserAtomic({
+        name,
+        email,
+        role,
+        phone: phone || null,
+        businessAccountId,
+        createdByUserId,
+        permissions: permissions || {}
+      });
+      
+      res.json({
+        message: "Usuario creado exitosamente",
+        user: {
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          role: result.user.role
+        },
+        limits: req.userLimits,
+        permissionsAssigned: result.permissionsAssigned
+      });
+    } catch (error) {
+      console.error("Error creating enhanced user:", error);
+      res.status(500).json({ message: error.message || "Error al crear usuario" });
+    }
+  });
+
+  // User activation/deactivation
+  app.patch("/api/users/:id/activation", requireAuth, requireBusinessAccount, requireRole(['BUSINESS_ADMIN', 'SUPER_ADMIN']), requireActionPermission('modify_data'), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { isActive, reason } = req.body;
+      const businessAccountId = req.businessAccountId;
+      const modifiedByUserId = req.user.id;
+      
+      // Update user activation status
+      await pool.query(`
+        UPDATE users 
+        SET is_active = $1,
+            deactivated_at = $2,
+            deactivated_by = $3,
+            updated_at = NOW()
+        WHERE id = $4 AND business_account_id = $5
+      `, [
+        isActive,
+        isActive ? null : new Date(),
+        isActive ? null : modifiedByUserId,
+        id,
+        businessAccountId
+      ]);
+      
+      res.json({
+        message: `Usuario ${isActive ? 'activado' : 'desactivado'} exitosamente`,
+        isActive,
+        reason
+      });
+    } catch (error) {
+      console.error("Error updating user activation:", error);
+      res.status(500).json({ message: "Error al actualizar estado de usuario" });
+    }
+  });
+
+  // Get account status (for frontend)
+  app.get("/api/account/status", requireAuth, requireBusinessAccount, includeAccountStatus, async (req: any, res) => {
+    try {
+      const businessAccountId = req.businessAccountId;
+      const userRole = req.user.role;
+      
+      // const suspensionMessage = await suspensionService.getSuspensionMessage(businessAccountId, userRole);
+      // const billingInfo = await stripeService.getBillingInfo(businessAccountId);
+      
+      res.json({
+        suspensionMessage: null,
+        paymentStatus: 'active',
+        canUseApp: true
+      });
+    } catch (error) {
+      console.error("Error getting account status:", error);
+      res.status(500).json({ message: "Error al obtener estado de cuenta" });
+    }
+  });
+
+  // =====================================================
+  // PROFILE MANAGEMENT ENDPOINTS
+  // =====================================================
+
+  // Change password
+  app.post("/api/auth/change-password", requireAuth, async (req: any, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      const userId = req.user.id;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Contraseña actual y nueva contraseña son requeridas" });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ message: "La nueva contraseña debe tener al menos 8 caracteres" });
+      }
+
+      // Get current user data
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      // Verify current password
+      const isCurrentPasswordValid = await verifyPasswordSecure(currentPassword, user.password);
+      if (!isCurrentPasswordValid) {
+        return res.status(400).json({ message: "Contraseña actual incorrecta" });
+      }
+
+      // Hash new password
+      const hashedNewPassword = await hashPasswordSecure(newPassword);
+
+      // Update password and last password change date
+      await pool.query(`
+        UPDATE users 
+        SET password = $1, last_password_change = NOW(), updated_at = NOW()
+        WHERE id = $2
+      `, [hashedNewPassword, userId]);
+
+      secureLog('password_changed', {
+        userId,
+        userEmail: user.email,
+        changedAt: new Date().toISOString()
+      });
+
+      res.json({ message: "Contraseña actualizada exitosamente" });
+    } catch (error) {
+      console.error("Error changing password:", error);
+      res.status(500).json({ message: "Error al cambiar contraseña" });
+    }
+  });
+
+  // Upload avatar (placeholder - would need proper file upload middleware)
+  app.post("/api/users/upload-avatar", requireAuth, async (req: any, res) => {
+    try {
+      // This is a placeholder implementation
+      // In a real implementation, you would use middleware like multer
+      // and upload to a service like AWS S3, Cloudinary, etc.
+      
+      const userId = req.user.id;
+      
+      // For now, we'll just return a placeholder URL
+      // In production, this would handle actual file upload
+      const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(req.user.name)}`;
+      
+      await pool.query(`
+        UPDATE users 
+        SET profile_image_url = $1, updated_at = NOW()
+        WHERE id = $2
+      `, [avatarUrl, userId]);
+
+      secureLog('avatar_updated', {
+        userId,
+        userEmail: req.user.email,
+        avatarUrl
+      });
+
+      res.json({ 
+        message: "Avatar actualizado exitosamente",
+        avatarUrl 
+      });
+    } catch (error) {
+      console.error("Error uploading avatar:", error);
+      res.status(500).json({ message: "Error al subir avatar" });
     }
   });
 
@@ -4334,7 +5325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { moduleType } = req.params;
       const businessAccountId = req.businessAccountId;
       const userId = req.user.id; // Pass user ID for custom permissions check
-      
+
       const permissions = await planService.getModulePermissions(businessAccountId, moduleType, userId);
       res.json(permissions);
     } catch (error) {
