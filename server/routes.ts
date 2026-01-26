@@ -24,6 +24,7 @@ import { checkAccountStatus, requireActiveAccount, includeAccountStatus, require
 // import { stripeService } from "./services/stripeService";
 import { planService } from "./services/planService";
 import { z } from "zod";
+import Papa from "papaparse";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -2614,11 +2615,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/companies", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), checkPlanLimits('CONTACTS', 'create'), validateJWTCSRFToken, async (req: any, res) => {
     try {
       const companyData = insertCompanySchema.parse(req.body);
+      const businessAccountId = req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.body.businessAccountId || req.businessAccountId);
 
-      // Create company object with businessAccountId
+      // Check for duplicates
+      const { emailExists, phoneExists } = await storage.checkDuplicateContact(
+        businessAccountId,
+        companyData.email,
+        companyData.phone
+      );
+
+      if (emailExists || phoneExists) {
+        const errors: string[] = [];
+        if (emailExists) errors.push('El correo electrónico ya está registrado en otro contacto');
+        if (phoneExists) errors.push('El teléfono ya está registrado en otro contacto');
+        return res.status(400).json({
+          message: 'Contacto duplicado',
+          errors,
+          emailExists,
+          phoneExists
+        });
+      }
+
+      // Create company object with businessAccountId and createdBy
       const finalCompanyData: any = {
         ...companyData,
-        businessAccountId: req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.body.businessAccountId || req.businessAccountId)
+        businessAccountId,
+        createdBy: req.user.id,
+        source: companyData.source || 'MANUAL'
       };
 
       const company = await storage.createCompany(finalCompanyData);
@@ -2642,6 +2665,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updateData = updateCompanySchema.parse(req.body);
+
+      // Check for duplicates (excluding current record)
+      if (updateData.email || updateData.phone) {
+        const { emailExists, phoneExists } = await storage.checkDuplicateContact(
+          existingCompany.businessAccountId,
+          updateData.email,
+          updateData.phone,
+          req.params.id // Exclude current record
+        );
+
+        if (emailExists || phoneExists) {
+          const errors: string[] = [];
+          if (emailExists) errors.push('El correo electrónico ya está registrado en otro contacto');
+          if (phoneExists) errors.push('El teléfono ya está registrado en otro contacto');
+          return res.status(400).json({
+            message: 'Contacto duplicado',
+            errors,
+            emailExists,
+            phoneExists
+          });
+        }
+      }
+
       const company = await storage.updateCompany(req.params.id, updateData);
       res.json(company);
     } catch (error) {
@@ -2671,6 +2717,405 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting company:", error);
       res.status(500).json({ message: "Failed to delete company" });
+    }
+  });
+
+  // Get deleted contacts (papelera/trash)
+  app.get("/api/companies/deleted", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
+    try {
+      let businessAccountId;
+      if (req.user.role === 'SUPER_ADMIN') {
+        businessAccountId = req.query.businessAccountId || null;
+      } else {
+        businessAccountId = req.businessAccountId;
+      }
+
+      // Get only deleted companies
+      const allCompanies = await storage.getCompanies(businessAccountId, true); // includeDeleted = true
+      const deletedCompanies = allCompanies.filter(c => c.isDeleted === true);
+      res.json(deletedCompanies);
+    } catch (error) {
+      console.error("Error fetching deleted companies:", error);
+      res.status(500).json({ message: "Failed to fetch deleted companies" });
+    }
+  });
+
+  // Restore a deleted contact
+  app.post("/api/companies/:id/restore", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      // Get the deleted company (includeDeleted = true)
+      const existingCompany = await storage.getCompany(req.params.id, true);
+      if (!existingCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      if (!existingCompany.isDeleted) {
+        return res.status(400).json({ message: "Company is not deleted" });
+      }
+
+      if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const restored = await storage.restoreCompany(req.params.id);
+      if (restored) {
+        res.json({ message: "Company restored successfully", company: restored });
+      } else {
+        res.status(500).json({ message: "Failed to restore company" });
+      }
+    } catch (error) {
+      console.error("Error restoring company:", error);
+      res.status(500).json({ message: "Failed to restore company" });
+    }
+  });
+
+  // Permanently delete a contact (only BUSINESS_ADMIN or SUPER_ADMIN)
+  app.delete("/api/companies/:id/permanent", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), requireAnyRole(['SUPER_ADMIN', 'BUSINESS_ADMIN']), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      // Get the company (includeDeleted = true to find it even if soft-deleted)
+      const existingCompany = await storage.getCompany(req.params.id, true);
+      if (!existingCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const deleted = await storage.permanentDeleteCompany(req.params.id);
+      if (deleted) {
+        res.json({ message: "Company permanently deleted" });
+      } else {
+        res.status(500).json({ message: "Failed to permanently delete company" });
+      }
+    } catch (error) {
+      console.error("Error permanently deleting company:", error);
+      res.status(500).json({ message: "Failed to permanently delete company" });
+    }
+  });
+
+  // Check for duplicate contacts (for real-time validation)
+  app.get("/api/companies/check-duplicate", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
+    try {
+      const { email, phone, excludeId } = req.query;
+      const businessAccountId = req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.query.businessAccountId || req.businessAccountId);
+
+      const result = await storage.checkDuplicateContact(
+        businessAccountId,
+        email as string,
+        phone as string,
+        excludeId as string
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error checking duplicates:", error);
+      res.status(500).json({ message: "Failed to check duplicates" });
+    }
+  });
+
+  // Advanced search for contacts with filters and pagination
+  app.get("/api/companies/search", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
+    try {
+      const businessAccountId = req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.query.businessAccountId || req.businessAccountId);
+
+      // Parse query parameters
+      const searchParams = {
+        query: req.query.q as string,
+        status: req.query.status as string,
+        tags: req.query.tags ? (Array.isArray(req.query.tags) ? req.query.tags : [req.query.tags]) : undefined,
+        source: req.query.source as string,
+        city: req.query.city as string,
+        country: req.query.country as string,
+        page: req.query.page ? parseInt(req.query.page as string, 10) : 1,
+        pageSize: req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : 20,
+        sortBy: req.query.sortBy as 'name' | 'email' | 'createdAt' | 'updatedAt',
+        sortOrder: req.query.sortOrder as 'asc' | 'desc'
+      };
+
+      // Validate pagination limits
+      if (searchParams.pageSize > 100) searchParams.pageSize = 100;
+      if (searchParams.pageSize < 1) searchParams.pageSize = 20;
+      if (searchParams.page < 1) searchParams.page = 1;
+
+      const result = await storage.searchCompanies(businessAccountId, searchParams);
+      res.json(result);
+    } catch (error) {
+      console.error("Error searching companies:", error);
+      res.status(500).json({ message: "Failed to search companies" });
+    }
+  });
+
+  // Export contacts to CSV
+  app.get("/api/companies/export", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
+    try {
+      const businessAccountId = req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.query.businessAccountId || req.businessAccountId);
+
+      // Get all companies (non-deleted) for this business account
+      const companies = await storage.getCompanies(businessAccountId, false);
+
+      // Map to CSV-friendly format
+      const csvData = companies.map(c => ({
+        nombre: c.name || '',
+        email: c.email || '',
+        telefono: c.phone || '',
+        movil: c.mobile || '',
+        empresa: c.companyName || '',
+        cargo: c.position || '',
+        nombre_contacto: c.contactName || '',
+        sitio_web: c.website || '',
+        industria: c.industry || '',
+        direccion: c.address || '',
+        ciudad: c.city || '',
+        pais: c.country || '',
+        notas: c.notes || '',
+        etiquetas: c.tags ? c.tags.join(', ') : '',
+        estado: c.status || '',
+        origen: c.source || '',
+        fecha_creacion: c.createdAt ? new Date(c.createdAt).toISOString() : '',
+      }));
+
+      const csv = Papa.unparse(csvData, {
+        header: true,
+        quotes: true,
+      });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="contactos_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Error exporting companies:", error);
+      res.status(500).json({ message: "Failed to export companies" });
+    }
+  });
+
+  // Download CSV template for import
+  app.get("/api/companies/import/template", requireAuth, requireBusinessAccountWithId, requireModule('CONTACTS'), async (req: any, res) => {
+    try {
+      const templateData = [{
+        nombre: 'Juan Pérez',
+        email: 'juan@ejemplo.com',
+        telefono: '+504 9999-9999',
+        movil: '+504 8888-8888',
+        empresa: 'Empresa ABC',
+        cargo: 'Gerente',
+        nombre_contacto: 'Juan',
+        sitio_web: 'https://ejemplo.com',
+        industria: 'Tecnología',
+        direccion: 'Calle Principal #123',
+        ciudad: 'Tegucigalpa',
+        pais: 'Honduras',
+        notas: 'Cliente potencial',
+        etiquetas: 'vip, corporativo',
+        estado: 'LEAD'
+      }];
+
+      const csv = Papa.unparse(templateData, {
+        header: true,
+        quotes: true,
+      });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="plantilla_contactos.csv"');
+      res.send(csv);
+    } catch (error) {
+      console.error("Error generating template:", error);
+      res.status(500).json({ message: "Failed to generate template" });
+    }
+  });
+
+  // Import contacts from CSV
+  app.post("/api/companies/import", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      const { csvData, skipDuplicates = true } = req.body;
+      const businessAccountId = req.user.role !== 'SUPER_ADMIN' ? req.businessAccountId : (req.body.businessAccountId || req.businessAccountId);
+
+      if (!csvData) {
+        return res.status(400).json({ message: "No CSV data provided" });
+      }
+
+      // Parse CSV
+      const parsed = Papa.parse(csvData, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (header: string) => header.trim().toLowerCase(),
+      });
+
+      if (parsed.errors.length > 0) {
+        return res.status(400).json({
+          message: "CSV parsing errors",
+          errors: parsed.errors.map((e: any) => ({ row: e.row, message: e.message }))
+        });
+      }
+
+      const results = {
+        total: parsed.data.length,
+        imported: 0,
+        skipped: 0,
+        errors: [] as { row: number; field: string; message: string }[]
+      };
+
+      // Process each row
+      for (let i = 0; i < parsed.data.length; i++) {
+        const row: any = parsed.data[i];
+        const rowNum = i + 2; // +2 because row 1 is header, and we start at 0
+
+        try {
+          // Map CSV columns to company fields
+          const companyData: any = {
+            name: row.nombre || row.name || '',
+            email: row.email || row.correo || '',
+            phone: row.telefono || row.phone || '',
+            mobile: row.movil || row.mobile || '',
+            companyName: row.empresa || row.company || row.company_name || '',
+            position: row.cargo || row.position || '',
+            contactName: row.nombre_contacto || row.contact_name || '',
+            website: row.sitio_web || row.website || '',
+            industry: row.industria || row.industry || '',
+            address: row.direccion || row.address || '',
+            city: row.ciudad || row.city || '',
+            country: row.pais || row.country || '',
+            notes: row.notas || row.notes || '',
+            tags: row.etiquetas || row.tags ? (row.etiquetas || row.tags).split(',').map((t: string) => t.trim()).filter((t: string) => t) : [],
+            status: row.estado || row.status || 'LEAD',
+            source: 'IMPORTED',
+            businessAccountId,
+            createdBy: req.user.id,
+          };
+
+          // Validate required fields
+          if (!companyData.name) {
+            results.errors.push({ row: rowNum, field: 'nombre', message: 'El nombre es requerido' });
+            continue;
+          }
+
+          if (!companyData.email && !companyData.phone) {
+            results.errors.push({ row: rowNum, field: 'email/telefono', message: 'Se requiere al menos email o teléfono' });
+            continue;
+          }
+
+          // Check for duplicates
+          const { emailExists, phoneExists } = await storage.checkDuplicateContact(
+            businessAccountId,
+            companyData.email,
+            companyData.phone
+          );
+
+          if (emailExists || phoneExists) {
+            if (skipDuplicates) {
+              results.skipped++;
+              continue;
+            } else {
+              const dupField = emailExists ? 'email' : 'telefono';
+              results.errors.push({ row: rowNum, field: dupField, message: `${dupField} duplicado` });
+              continue;
+            }
+          }
+
+          // Validate status
+          const validStatuses = ['LEAD', 'ACTIVE', 'INACTIVE', 'BLOCKED'];
+          if (!validStatuses.includes(companyData.status.toUpperCase())) {
+            companyData.status = 'LEAD';
+          } else {
+            companyData.status = companyData.status.toUpperCase();
+          }
+
+          // Create the contact
+          await storage.createCompany(companyData);
+          results.imported++;
+
+        } catch (error: any) {
+          results.errors.push({ row: rowNum, field: 'general', message: error.message || 'Error al importar fila' });
+        }
+      }
+
+      res.json({
+        message: `Importación completada: ${results.imported} contactos importados`,
+        results
+      });
+
+    } catch (error) {
+      console.error("Error importing companies:", error);
+      res.status(500).json({ message: "Failed to import companies" });
+    }
+  });
+
+  // Update contact avatar (base64)
+  app.put("/api/companies/:id/avatar", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      const { avatar } = req.body; // Expected: base64 data URL or URL string
+
+      // Validate company exists and user has access
+      const existingCompany = await storage.getCompany(req.params.id);
+      if (!existingCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Validate avatar data
+      if (avatar) {
+        // Check if it's a valid data URL or regular URL
+        const isDataUrl = avatar.startsWith('data:image/');
+        const isUrl = avatar.startsWith('http://') || avatar.startsWith('https://');
+
+        if (!isDataUrl && !isUrl) {
+          return res.status(400).json({ message: "Invalid avatar format. Must be a data URL or HTTP(S) URL" });
+        }
+
+        // If data URL, validate size (max ~2MB base64 ~ 2.7MB string)
+        if (isDataUrl && avatar.length > 2700000) {
+          return res.status(400).json({ message: "Avatar too large. Maximum size is 2MB" });
+        }
+
+        // Validate image type for data URLs
+        if (isDataUrl) {
+          const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+          const mimeMatch = avatar.match(/data:([^;]+);/);
+          if (!mimeMatch || !validTypes.includes(mimeMatch[1])) {
+            return res.status(400).json({ message: "Invalid image type. Allowed: JPEG, PNG, WebP, GIF" });
+          }
+        }
+      }
+
+      // Update the avatar
+      const updated = await storage.updateCompany(req.params.id, { avatar: avatar || null });
+
+      if (updated) {
+        res.json({ message: "Avatar updated successfully", company: updated });
+      } else {
+        res.status(500).json({ message: "Failed to update avatar" });
+      }
+    } catch (error) {
+      console.error("Error updating avatar:", error);
+      res.status(500).json({ message: "Failed to update avatar" });
+    }
+  });
+
+  // Delete contact avatar
+  app.delete("/api/companies/:id/avatar", requireAuthWithCSRF, requireBusinessAccountWithId, requireModule('CONTACTS'), validateJWTCSRFToken, async (req: any, res) => {
+    try {
+      const existingCompany = await storage.getCompany(req.params.id);
+      if (!existingCompany) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+
+      if (req.user.role !== 'SUPER_ADMIN' && existingCompany.businessAccountId !== req.businessAccountId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const updated = await storage.updateCompany(req.params.id, { avatar: null });
+
+      if (updated) {
+        res.json({ message: "Avatar removed successfully" });
+      } else {
+        res.status(500).json({ message: "Failed to remove avatar" });
+      }
+    } catch (error) {
+      console.error("Error removing avatar:", error);
+      res.status(500).json({ message: "Failed to remove avatar" });
     }
   });
 

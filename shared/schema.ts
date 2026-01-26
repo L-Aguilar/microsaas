@@ -10,6 +10,7 @@ export const opportunityStatusEnum = pgEnum('opportunity_status', ['NEW', 'IN_PR
 export const activityTypeEnum = pgEnum('activity_type', ['CALL', 'MEETING', 'NOTE']);
 export const userRoleEnum = pgEnum('user_role', ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'USER']);
 export const moduleTypeEnum = pgEnum('module_type', ['USERS', 'CONTACTS', 'CRM']);
+export const contactSourceEnum = pgEnum('contact_source', ['MANUAL', 'IMPORTED', 'API']);
 
 // SaaS Plan and Billing Enums
 export const billingFrequencyEnum = pgEnum('billing_frequency', ['MONTHLY', 'ANNUAL']);
@@ -65,7 +66,7 @@ export const businessAccountModules = pgTable("business_account_modules", {
 });
 
 
-// Companies table
+// Companies table (used as Contacts module)
 export const companies = pgTable("companies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -76,7 +77,23 @@ export const companies = pgTable("companies", {
   email: text("email"),
   website: text("website"),
   phone: text("phone"),
-  industry: text("industry"), // Optional industry field
+  industry: text("industry"),
+  // New contact fields
+  mobile: text("mobile"),
+  companyName: text("company_name"), // Company the contact works for (different from "name" which is contact's name)
+  position: text("position"),
+  address: text("address"),
+  city: text("city"),
+  country: text("country"),
+  avatar: text("avatar"), // URL to contact's profile picture
+  notes: text("notes"),
+  tags: text("tags").array(), // Array of tags for categorization
+  source: contactSourceEnum("source").default('MANUAL'),
+  createdBy: varchar("created_by").references(() => users.id),
+  // Soft delete fields
+  isDeleted: boolean("is_deleted").default(false).notNull(),
+  deletedAt: timestamp("deleted_at"),
+  // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -121,9 +138,22 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
-  businessAccountId: true, // Omit this field - it's assigned automatically by the backend
+  businessAccountId: true, // Assigned automatically by the backend
+  createdBy: true, // Assigned automatically by the backend
+  isDeleted: true, // Managed by backend
+  deletedAt: true, // Managed by backend
 }).extend({
   website: z.string().optional(),
+  mobile: z.string().optional(),
+  companyName: z.string().optional(),
+  position: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  country: z.string().optional(),
+  avatar: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  source: z.enum(['MANUAL', 'IMPORTED', 'API']).optional(),
 }).refine((data) => {
   // At least one of email or phone must be provided
   const hasEmail = data.email && data.email.trim() !== '';
@@ -161,13 +191,26 @@ export const insertBusinessAccountModuleSchema = createInsertSchema(businessAcco
   enabledAt: true,
 });
 
-// Update schemas  
+// Update schemas
 const baseCompanySchema = createInsertSchema(companies).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  createdBy: true,
+  isDeleted: true,
+  deletedAt: true,
 }).extend({
   website: z.string().optional(),
+  mobile: z.string().optional(),
+  companyName: z.string().optional(),
+  position: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  country: z.string().optional(),
+  avatar: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  source: z.enum(['MANUAL', 'IMPORTED', 'API']).optional(),
 });
 
 export const updateCompanySchema = baseCompanySchema.partial();

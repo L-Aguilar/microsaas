@@ -2,6 +2,20 @@ import { type User, type InsertUser, type UpdateUser, type Company, type InsertC
 import { pool } from "./db";
 import { randomUUID } from "crypto";
 
+// Search parameters for contacts
+export interface ContactSearchParams {
+  query?: string; // General search term (name, email, phone, company)
+  status?: string;
+  tags?: string[];
+  source?: string;
+  city?: string;
+  country?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: 'name' | 'email' | 'createdAt' | 'updatedAt';
+  sortOrder?: 'asc' | 'desc';
+}
+
 export interface IStorage {
   // Business Accounts (SaaS multi-tenant)
   getBusinessAccounts(): Promise<BusinessAccountWithRelations[]>;
@@ -20,13 +34,17 @@ export interface IStorage {
   getUsers(businessAccountId?: string): Promise<User[]>; // Optional filtering for SUPER_ADMIN
   deleteUser(id: string): Promise<boolean>;
 
-  // Companies (filtered by business account)
-  getCompanies(businessAccountId?: string): Promise<CompanyWithRelations[]>;
+  // Companies/Contacts (filtered by business account)
+  getCompanies(businessAccountId?: string, includeDeleted?: boolean): Promise<CompanyWithRelations[]>;
   getAllCompanies(): Promise<CompanyWithRelations[]>; // Alias for getCompanies() without filter
-  getCompany(id: string): Promise<CompanyWithRelations | undefined>;
-  createCompany(company: InsertCompany & { businessAccountId: string }): Promise<Company>;
+  getCompany(id: string, includeDeleted?: boolean): Promise<CompanyWithRelations | undefined>;
+  createCompany(company: InsertCompany & { businessAccountId: string; createdBy?: string }): Promise<Company>;
   updateCompany(id: string, company: UpdateCompany): Promise<Company | undefined>;
-  deleteCompany(id: string): Promise<boolean>;
+  deleteCompany(id: string): Promise<boolean>; // Soft delete
+  restoreCompany(id: string): Promise<Company | undefined>; // Restore from soft delete
+  permanentDeleteCompany(id: string): Promise<boolean>; // Hard delete
+  checkDuplicateContact(businessAccountId: string, email?: string, phone?: string, excludeId?: string): Promise<{ emailExists: boolean; phoneExists: boolean }>;
+  searchCompanies(businessAccountId: string, params: ContactSearchParams): Promise<{ data: CompanyWithRelations[]; total: number; page: number; pageSize: number }>;
 
   // Opportunities (filtered by business account)
   getOpportunities(businessAccountId?: string): Promise<OpportunityWithRelations[]>;
@@ -984,21 +1002,37 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  // Companies methods
-  async getCompanies(businessAccountId?: string): Promise<CompanyWithRelations[]> {
-    const companiesQuery = businessAccountId 
-      ? db.select().from(companies).where(eq(companies.businessAccountId, businessAccountId))
-      : db.select().from(companies);
-    
-    const companiesArray = await companiesQuery;
-    
+  // Companies/Contacts methods
+  async getCompanies(businessAccountId?: string, includeDeleted: boolean = false): Promise<CompanyWithRelations[]> {
+    // Use raw SQL to handle the new fields properly
+    let query = `
+      SELECT c.* FROM companies c
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    let paramCount = 1;
+
+    if (businessAccountId) {
+      query += ` AND c.business_account_id = $${paramCount++}`;
+      params.push(businessAccountId);
+    }
+
+    if (!includeDeleted) {
+      query += ` AND (c.is_deleted = false OR c.is_deleted IS NULL)`;
+    }
+
+    query += ` ORDER BY c.created_at DESC`;
+
+    const result = await pool.query(query, params);
+    const companiesArray = result.rows.map(this.mapCompanyRow);
+
     // For each company, get related data
     const companiesWithRelations = await Promise.all(
       companiesArray.map(async company => {
         const owner = company.ownerId ? (await this.getUser(company.ownerId) ?? null) : null;
         const companyOpportunities = await db.select().from(opportunities).where(eq(opportunities.companyId, company.id));
         const businessAccount = await db.select().from(businessAccounts).where(eq(businessAccounts.id, company.businessAccountId));
-        
+
         return {
           ...company,
           owner,
@@ -1007,7 +1041,7 @@ export class DatabaseStorage implements IStorage {
         };
       })
     );
-    
+
     return companiesWithRelations;
   }
 
@@ -1015,10 +1049,16 @@ export class DatabaseStorage implements IStorage {
     return this.getCompanies();
   }
 
-  async getCompany(id: string): Promise<CompanyWithRelations | undefined> {
-    const [company] = await db.select().from(companies).where(eq(companies.id, id));
-    if (!company) return undefined;
+  async getCompany(id: string, includeDeleted: boolean = false): Promise<CompanyWithRelations | undefined> {
+    let query = `SELECT * FROM companies WHERE id = $1`;
+    if (!includeDeleted) {
+      query += ` AND (is_deleted = false OR is_deleted IS NULL)`;
+    }
 
+    const result = await pool.query(query, [id]);
+    if (result.rows.length === 0) return undefined;
+
+    const company = this.mapCompanyRow(result.rows[0]);
     const owner = company.ownerId ? (await this.getUser(company.ownerId) ?? null) : null;
     const companyOpportunities = await db.select().from(opportunities).where(eq(opportunities.companyId, company.id));
     const businessAccount = await db.select().from(businessAccounts).where(eq(businessAccounts.id, company.businessAccountId));
@@ -1031,17 +1071,86 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async createCompany(companyData: InsertCompany & { businessAccountId: string }): Promise<Company> {
-    const [company] = await db.insert(companies).values(companyData).returning();
-    return company;
+  // Helper to map database row to Company object
+  private mapCompanyRow(row: any): Company {
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      contactName: row.contact_name,
+      website: row.website,
+      status: row.status,
+      ownerId: row.owner_id,
+      industry: row.industry,
+      businessAccountId: row.business_account_id,
+      // New fields
+      mobile: row.mobile,
+      companyName: row.company_name,
+      position: row.position,
+      address: row.address,
+      city: row.city,
+      country: row.country,
+      avatar: row.avatar,
+      notes: row.notes,
+      tags: row.tags,
+      source: row.source,
+      createdBy: row.created_by,
+      isDeleted: row.is_deleted ?? false,
+      deletedAt: row.deleted_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  async createCompany(companyData: InsertCompany & { businessAccountId: string; createdBy?: string }): Promise<Company> {
+    const query = `
+      INSERT INTO companies (
+        id, name, email, phone, contact_name, website, status, owner_id, industry,
+        business_account_id, mobile, company_name, position, address, city, country,
+        avatar, notes, tags, source, created_by, is_deleted, created_at, updated_at
+      ) VALUES (
+        gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, false, NOW(), NOW()
+      )
+      RETURNING *
+    `;
+
+    const values = [
+      companyData.name,
+      companyData.email || null,
+      companyData.phone || null,
+      companyData.contactName || null,
+      companyData.website || null,
+      companyData.status || 'LEAD',
+      companyData.ownerId || null,
+      companyData.industry || null,
+      companyData.businessAccountId,
+      companyData.mobile || null,
+      companyData.companyName || null,
+      companyData.position || null,
+      companyData.address || null,
+      companyData.city || null,
+      companyData.country || null,
+      companyData.avatar || null,
+      companyData.notes || null,
+      companyData.tags || null,
+      companyData.source || 'MANUAL',
+      companyData.createdBy || null,
+    ];
+
+    const result = await pool.query(query, values);
+    return this.mapCompanyRow(result.rows[0]);
   }
 
   async updateCompany(id: string, companyData: UpdateCompany): Promise<Company | undefined> {
     // Use raw SQL for reliability with Supabase
-    const fields = [];
-    const values = [];
+    const fields: string[] = [];
+    const values: any[] = [];
     let paramCount = 1;
-    
+
+    // Original fields
     if (companyData.name !== undefined) {
       fields.push(`name = $${paramCount++}`);
       values.push(companyData.name);
@@ -1074,49 +1183,268 @@ export class DatabaseStorage implements IStorage {
       fields.push(`industry = $${paramCount++}`);
       values.push(companyData.industry);
     }
-    
+
+    // New contact fields
+    if (companyData.mobile !== undefined) {
+      fields.push(`mobile = $${paramCount++}`);
+      values.push(companyData.mobile);
+    }
+    if (companyData.companyName !== undefined) {
+      fields.push(`company_name = $${paramCount++}`);
+      values.push(companyData.companyName);
+    }
+    if (companyData.position !== undefined) {
+      fields.push(`position = $${paramCount++}`);
+      values.push(companyData.position);
+    }
+    if (companyData.address !== undefined) {
+      fields.push(`address = $${paramCount++}`);
+      values.push(companyData.address);
+    }
+    if (companyData.city !== undefined) {
+      fields.push(`city = $${paramCount++}`);
+      values.push(companyData.city);
+    }
+    if (companyData.country !== undefined) {
+      fields.push(`country = $${paramCount++}`);
+      values.push(companyData.country);
+    }
+    if (companyData.avatar !== undefined) {
+      fields.push(`avatar = $${paramCount++}`);
+      values.push(companyData.avatar);
+    }
+    if (companyData.notes !== undefined) {
+      fields.push(`notes = $${paramCount++}`);
+      values.push(companyData.notes);
+    }
+    if (companyData.tags !== undefined) {
+      fields.push(`tags = $${paramCount++}`);
+      values.push(companyData.tags);
+    }
+    if (companyData.source !== undefined) {
+      fields.push(`source = $${paramCount++}`);
+      values.push(companyData.source);
+    }
+
     // Always update the timestamp
     fields.push(`updated_at = NOW()`);
     values.push(id); // ID goes last
-    
+
     if (fields.length === 1) { // Only updated_at, no other fields
       return undefined;
     }
-    
+
     const query = `
-      UPDATE companies 
-      SET ${fields.join(', ')} 
-      WHERE id = $${paramCount}
-      RETURNING id, name, email, phone, contact_name, website, status, owner_id, industry, business_account_id, created_at, updated_at
+      UPDATE companies
+      SET ${fields.join(', ')}
+      WHERE id = $${paramCount} AND (is_deleted = false OR is_deleted IS NULL)
+      RETURNING *
     `;
-    
-    console.log('Updating company with query:', query);
-    console.log('Values:', values);
-    
+
     const result = await pool.query(query, values);
-    
+
     if (result.rows.length === 0) return undefined;
-    
-    const row = result.rows[0];
-    return {
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      phone: row.phone,
-      contactName: row.contact_name,
-      website: row.website,
-      status: row.status,
-      ownerId: row.owner_id,
-      industry: row.industry,
-      businessAccountId: row.business_account_id,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    };
+    return this.mapCompanyRow(result.rows[0]);
   }
 
+  // Soft delete - marks as deleted but keeps the record
   async deleteCompany(id: string): Promise<boolean> {
+    const query = `
+      UPDATE companies
+      SET is_deleted = true, deleted_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND (is_deleted = false OR is_deleted IS NULL)
+      RETURNING id
+    `;
+    const result = await pool.query(query, [id]);
+    return result.rows.length > 0;
+  }
+
+  // Restore a soft-deleted company
+  async restoreCompany(id: string): Promise<Company | undefined> {
+    const query = `
+      UPDATE companies
+      SET is_deleted = false, deleted_at = NULL, updated_at = NOW()
+      WHERE id = $1 AND is_deleted = true
+      RETURNING *
+    `;
+    const result = await pool.query(query, [id]);
+    if (result.rows.length === 0) return undefined;
+    return this.mapCompanyRow(result.rows[0]);
+  }
+
+  // Permanent delete - removes the record completely
+  async permanentDeleteCompany(id: string): Promise<boolean> {
     const result = await db.delete(companies).where(eq(companies.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Check for duplicate email/phone within the same business account
+  async checkDuplicateContact(
+    businessAccountId: string,
+    email?: string,
+    phone?: string,
+    excludeId?: string
+  ): Promise<{ emailExists: boolean; phoneExists: boolean }> {
+    let emailExists = false;
+    let phoneExists = false;
+
+    if (email && email.trim() !== '') {
+      let query = `
+        SELECT id FROM companies
+        WHERE business_account_id = $1
+        AND LOWER(email) = LOWER($2)
+        AND (is_deleted = false OR is_deleted IS NULL)
+      `;
+      const params: any[] = [businessAccountId, email.trim()];
+
+      if (excludeId) {
+        query += ` AND id != $3`;
+        params.push(excludeId);
+      }
+
+      const result = await pool.query(query, params);
+      emailExists = result.rows.length > 0;
+    }
+
+    if (phone && phone.trim() !== '') {
+      let query = `
+        SELECT id FROM companies
+        WHERE business_account_id = $1
+        AND phone = $2
+        AND (is_deleted = false OR is_deleted IS NULL)
+      `;
+      const params: any[] = [businessAccountId, phone.trim()];
+
+      if (excludeId) {
+        query += ` AND id != $3`;
+        params.push(excludeId);
+      }
+
+      const result = await pool.query(query, params);
+      phoneExists = result.rows.length > 0;
+    }
+
+    return { emailExists, phoneExists };
+  }
+
+  // Search companies with filters and pagination
+  async searchCompanies(
+    businessAccountId: string,
+    params: ContactSearchParams
+  ): Promise<{ data: CompanyWithRelations[]; total: number; page: number; pageSize: number }> {
+    const {
+      query,
+      status,
+      tags,
+      source,
+      city,
+      country,
+      page = 1,
+      pageSize = 20,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = params;
+
+    const conditions: string[] = ['business_account_id = $1', '(is_deleted = false OR is_deleted IS NULL)'];
+    const queryParams: any[] = [businessAccountId];
+    let paramCount = 2;
+
+    // General search query (searches across multiple fields)
+    if (query && query.trim() !== '') {
+      const searchTerm = `%${query.trim().toLowerCase()}%`;
+      conditions.push(`(
+        LOWER(name) LIKE $${paramCount} OR
+        LOWER(email) LIKE $${paramCount} OR
+        phone LIKE $${paramCount} OR
+        LOWER(company_name) LIKE $${paramCount} OR
+        LOWER(contact_name) LIKE $${paramCount}
+      )`);
+      queryParams.push(searchTerm);
+      paramCount++;
+    }
+
+    // Status filter
+    if (status) {
+      conditions.push(`status = $${paramCount++}`);
+      queryParams.push(status);
+    }
+
+    // Tags filter (any match)
+    if (tags && tags.length > 0) {
+      conditions.push(`tags && $${paramCount++}`);
+      queryParams.push(tags);
+    }
+
+    // Source filter
+    if (source) {
+      conditions.push(`source = $${paramCount++}`);
+      queryParams.push(source);
+    }
+
+    // City filter
+    if (city) {
+      conditions.push(`LOWER(city) = LOWER($${paramCount++})`);
+      queryParams.push(city);
+    }
+
+    // Country filter
+    if (country) {
+      conditions.push(`LOWER(country) = LOWER($${paramCount++})`);
+      queryParams.push(country);
+    }
+
+    // Build WHERE clause
+    const whereClause = conditions.join(' AND ');
+
+    // Sort mapping
+    const sortColumn = {
+      name: 'name',
+      email: 'email',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at'
+    }[sortBy] || 'created_at';
+
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    // Count total
+    const countQuery = `SELECT COUNT(*) FROM companies WHERE ${whereClause}`;
+    const countResult = await pool.query(countQuery, queryParams);
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Get paginated data
+    const offset = (page - 1) * pageSize;
+    const dataQuery = `
+      SELECT * FROM companies
+      WHERE ${whereClause}
+      ORDER BY ${sortColumn} ${order}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `;
+
+    const dataResult = await pool.query(dataQuery, queryParams);
+    const companiesArray = dataResult.rows.map(this.mapCompanyRow);
+
+    // Get related data for each company
+    const companiesWithRelations = await Promise.all(
+      companiesArray.map(async company => {
+        const owner = company.ownerId ? (await this.getUser(company.ownerId) ?? null) : null;
+        const companyOpportunities = await db.select().from(opportunities).where(eq(opportunities.companyId, company.id));
+        const businessAccount = await db.select().from(businessAccounts).where(eq(businessAccounts.id, company.businessAccountId));
+
+        return {
+          ...company,
+          owner,
+          opportunities: companyOpportunities,
+          businessAccount: businessAccount[0],
+        };
+      })
+    );
+
+    return {
+      data: companiesWithRelations,
+      total,
+      page,
+      pageSize
+    };
   }
 
   // Opportunities methods
